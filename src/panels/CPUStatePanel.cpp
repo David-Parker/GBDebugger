@@ -16,6 +16,10 @@ void CPUStatePanel::Render() {
         return;
     }
     
+    // Set initial window position and size (only on first use)
+    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(200, 220), ImGuiCond_FirstUseEver);
+    
     ImGui::Begin(GetName());
     
     // Cycle count

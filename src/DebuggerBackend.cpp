@@ -34,11 +34,11 @@ bool DebuggerBackend::Initialize(const char* title, int width, int height) {
         return false;
     }
     
-    // Set OpenGL attributes
+    // Set OpenGL attributes - use OpenGL 2.1 for maximum compatibility
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
@@ -71,9 +71,9 @@ bool DebuggerBackend::Initialize(const char* title, int width, int height) {
     SDL_GL_MakeCurrent(window_, gl_context_);
     SDL_GL_SetSwapInterval(1); // Enable vsync
     
-    // Initialize ImGui backends
+    // Initialize ImGui backends - use GLSL 120 for OpenGL 2.1 compatibility
     ImGui_ImplSDL2_InitForOpenGL(window_, gl_context_);
-    ImGui_ImplOpenGL3_Init("#version 150");
+    ImGui_ImplOpenGL3_Init("#version 120");
     
     // Build font atlas
     ImGuiIO& io = ImGui::GetIO();

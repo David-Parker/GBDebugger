@@ -24,6 +24,10 @@ void MemoryViewerPanel::Render() {
         return;
     }
     
+    // Set initial window position and size (only on first use)
+    ImGui::SetNextWindowPos(ImVec2(220, 10), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(560, 580), ImGuiCond_FirstUseEver);
+    
     ImGui::Begin(GetName(), nullptr, ImGuiWindowFlags_HorizontalScrollbar);
     
     if (!state_.is_valid) {

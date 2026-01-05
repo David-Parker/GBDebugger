@@ -16,6 +16,10 @@ void FlagsPanel::Render() {
         return;
     }
     
+    // Set initial window position and size (only on first use)
+    ImGui::SetNextWindowPos(ImVec2(10, 240), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(200, 140), ImGuiCond_FirstUseEver);
+    
     ImGui::Begin(GetName());
     
     // Get flag values
