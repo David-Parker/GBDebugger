@@ -137,4 +137,12 @@ bool GBDebugger::IsExitRequested() const {
     return control_panel_->IsExitRequested();
 }
 
+int GBDebugger::GetSpeedMultiplier() const {
+    return control_panel_->GetSpeedMultiplier();
+}
+
+void GBDebugger::CycleSpeed() {
+    control_panel_->CycleSpeed();
+}
+
 } // namespace GBDebug
