@@ -3,196 +3,94 @@
 
 #include <cstdint>
 #include <cstddef>
-#include <array>
+#include <memory>
 
-// Forward declarations for SDL types to avoid including SDL headers in public header
+// Forward declarations
 struct SDL_Window;
 typedef void* SDL_GLContext;
 union SDL_Event;
 
-/**
- * GBDebugger - Emulator-agnostic GameBoy debugger using ImGui
- * 
- * This debugger provides a graphical interface for inspecting CPU state,
- * registers, flags, and memory during GameBoy emulation. It is designed
- * to work with any GameBoy emulator through a simple, standard C++ API.
- */
-
 namespace GBDebug {
 
-/**
- * CPU state structure containing all register values and flags
- */
-struct CPUState {
-    uint64_t cycle;  // Current CPU cycle count
-    uint16_t pc;     // Program Counter
-    uint16_t sp;     // Stack Pointer
-    uint16_t af;     // Accumulator and Flags register
-    uint16_t bc;     // BC register pair
-    uint16_t de;     // DE register pair
-    uint16_t hl;     // HL register pair
-    bool ime;        // Interrupt Master Enable flag
-    
-    // Computed flag accessors (from F register - lower byte of AF)
-    bool GetZFlag() const { return (af & 0x80) != 0; }  // Zero flag (bit 7)
-    bool GetNFlag() const { return (af & 0x40) != 0; }  // Subtraction flag (bit 6)
-    bool GetHFlag() const { return (af & 0x20) != 0; }  // Half-carry flag (bit 5)
-    bool GetCFlag() const { return (af & 0x10) != 0; }  // Carry flag (bit 4)
-    
-    // Individual register accessors
-    uint8_t GetA() const { return (af >> 8) & 0xFF; }
-    uint8_t GetF() const { return af & 0xFF; }
-    uint8_t GetB() const { return (bc >> 8) & 0xFF; }
-    uint8_t GetC() const { return bc & 0xFF; }
-    uint8_t GetD() const { return (de >> 8) & 0xFF; }
-    uint8_t GetE() const { return de & 0xFF; }
-    uint8_t GetH() const { return (hl >> 8) & 0xFF; }
-    uint8_t GetL() const { return hl & 0xFF; }
-};
+// Forward declarations for internal components
+class DebuggerBackend;
+class CPUStatePanel;
+class FlagsPanel;
+class MemoryViewerPanel;
 
 /**
- * Memory state structure containing the full 64KB GameBoy address space
- */
-struct MemoryState {
-    std::array<uint8_t, 65536> buffer;
-    bool is_valid;
-    
-    MemoryState() : is_valid(false) {
-        buffer.fill(0);
-    }
-    
-    uint8_t Read(uint16_t address) const {
-        return buffer[address];
-    }
-};
-
-/**
- * Color structure for memory region visualization
- * Compatible with ImGui's ImVec4 but defined independently to avoid ImGui dependency in header
- */
-struct Color {
-    float r, g, b, a;
-    
-    Color(float r_, float g_, float b_, float a_) : r(r_), g(g_), b(b_), a(a_) {}
-};
-
-/**
- * Memory region structure defining GameBoy memory map segments
- */
-struct MemoryRegion {
-    const char* name;
-    uint16_t start;
-    uint16_t end;
-    Color color;
-};
-
-/**
- * GameBoy memory map regions (12 distinct regions)
- */
-static const MemoryRegion MEMORY_REGIONS[] = {
-    {"ROM Bank 0",      0x0000, 0x3FFF, Color(0.8f, 0.8f, 1.0f, 1.0f)},
-    {"ROM Bank N",      0x4000, 0x7FFF, Color(0.7f, 0.7f, 1.0f, 1.0f)},
-    {"VRAM",            0x8000, 0x9FFF, Color(1.0f, 0.8f, 0.8f, 1.0f)},
-    {"External RAM",    0xA000, 0xBFFF, Color(0.8f, 1.0f, 0.8f, 1.0f)},
-    {"WRAM Bank 0",     0xC000, 0xCFFF, Color(1.0f, 1.0f, 0.8f, 1.0f)},
-    {"WRAM Bank N",     0xD000, 0xDFFF, Color(1.0f, 0.9f, 0.7f, 1.0f)},
-    {"Echo RAM",        0xE000, 0xFDFF, Color(0.6f, 0.6f, 0.6f, 1.0f)},
-    {"OAM",             0xFE00, 0xFE9F, Color(1.0f, 0.8f, 1.0f, 1.0f)},
-    {"Unusable",        0xFEA0, 0xFEFF, Color(0.5f, 0.5f, 0.5f, 1.0f)},
-    {"I/O Registers",   0xFF00, 0xFF7F, Color(0.8f, 1.0f, 1.0f, 1.0f)},
-    {"HRAM",            0xFF80, 0xFFFE, Color(1.0f, 1.0f, 0.6f, 1.0f)},
-    {"IE Register",     0xFFFF, 0xFFFF, Color(1.0f, 0.6f, 0.6f, 1.0f)}
-};
-
-/**
- * Main GBDebugger class
+ * GBDebugger - Emulator-agnostic GameBoy debugger
  * 
- * Provides an emulator-agnostic API for visualizing GameBoy state.
+ * This is the main API class for the debugger. It provides a clean interface
+ * for updating emulator state and rendering the debugger UI, while hiding
+ * all ImGui and rendering details internally.
+ * 
  * Usage:
  *   1. Create a GBDebugger instance
- *   2. Call Open() to initialize and show the debugger window
- *   3. Call UpdateCPU() and UpdateMemory() to provide state data
- *   4. Call Render() each frame to update the display
- *   5. Call Close() when done
+ *   2. Call Open() to initialize the debugger window
+ *   3. In your main loop:
+ *      - Call ProcessEvent() for each SDL event
+ *      - Call UpdateCPU() and UpdateMemory() with current state
+ *      - Call BeginFrame(), Render(), EndFrame() to draw
+ *   4. Call Close() when done
  */
 class GBDebugger {
 public:
     GBDebugger();
     ~GBDebugger();
     
-    // Lifecycle management
+    // ========== Lifecycle ==========
     
     /**
-     * Open the debugger window and initialize ImGui
-     * @return true if successful, false if initialization failed
+     * Open the debugger window
+     * @return true if successful
      */
     bool Open();
     
     /**
-     * Close the debugger window and cleanup resources
+     * Close the debugger and cleanup resources
      */
     void Close();
     
     /**
-     * Check if the debugger window is currently open
-     * @return true if open, false otherwise
+     * Check if debugger is open
      */
     bool IsOpen() const;
     
-    // SDL2/OpenGL backend methods
-    
     /**
-     * Initialize the SDL2/OpenGL backend for rendering
-     * Creates a separate debugger window with OpenGL context
-     * @return true if successful, false if initialization failed
+     * Check if the debugger window should close (user clicked X)
      */
-    bool InitSDL();
+    bool ShouldClose() const;
+    
+    // ========== Event Handling ==========
     
     /**
-     * Process an SDL event for ImGui interaction
-     * Should be called for each SDL event in the main event loop
-     * @param event Pointer to the SDL_Event to process
+     * Process an SDL event
+     * Should be called for each SDL event in your main loop
      */
     void ProcessSDLEvent(SDL_Event* event);
     
+    // ========== Frame Management ==========
+    
     /**
-     * Begin a new ImGui frame for SDL/OpenGL rendering
-     * Must be called before any ImGui rendering calls
+     * Begin a new frame - call before Render()
      */
     void BeginFrame();
     
     /**
-     * End the current ImGui frame and render to screen
-     * Must be called after all ImGui rendering calls
+     * Render all debugger panels
+     */
+    void Render();
+    
+    /**
+     * End the frame - call after Render()
      */
     void EndFrame();
     
-    /**
-     * Get the debugger's SDL window
-     * @return Pointer to the SDL_Window, or nullptr if not initialized
-     */
-    SDL_Window* GetWindow() const;
+    // ========== State Updates ==========
     
     /**
-     * Check if the debugger window should close (user clicked X)
-     * @return true if window close was requested
-     */
-    bool ShouldClose() const;
-    
-    // State update methods
-    
-    /**
-     * Update CPU state with current register values
-     * Can be called before Open() - data will be stored but not rendered
-     * 
-     * @param cycle Current CPU cycle count
-     * @param pc Program Counter value
-     * @param sp Stack Pointer value
-     * @param af AF register value (A in high byte, F in low byte)
-     * @param bc BC register value
-     * @param de DE register value
-     * @param hl HL register value
-     * @param ime Interrupt Master Enable flag state
+     * Update CPU state
      */
     void UpdateCPU(uint64_t cycle, 
                    uint16_t pc, 
@@ -204,39 +102,36 @@ public:
                    bool ime);
     
     /**
-     * Update memory state with current memory contents
-     * Can be called before Open() - data will be stored but not rendered
-     * 
-     * @param buffer Pointer to 65536-byte memory buffer
-     * @param size Size of buffer (must be 65536)
-     * @return true if successful, false if buffer is null or size is invalid
+     * Update memory state
+     * @param buffer Pointer to 64KB memory buffer
+     * @param size Must be 65536
+     * @return true if successful
      */
     bool UpdateMemory(const uint8_t* buffer, size_t size);
     
-    /**
-     * Render the debugger UI
-     * Should be called each frame when the debugger is open
-     * Safe to call when not open (will do nothing)
-     */
-    void Render();
+    // ========== Window Access ==========
     
+    /**
+     * Get the SDL window (for advanced use cases)
+     */
+    SDL_Window* GetWindow() const;
+    
+    // ========== Legacy Compatibility ==========
+    
+    /**
+     * Initialize SDL backend (legacy - now called automatically by Open())
+     * @deprecated Use Open() instead
+     */
+    bool InitSDL();
+
 private:
-    CPUState cpu_state_;
-    MemoryState memory_state_;
+    std::unique_ptr<DebuggerBackend> backend_;
+    std::unique_ptr<CPUStatePanel> cpu_panel_;
+    std::unique_ptr<FlagsPanel> flags_panel_;
+    std::unique_ptr<MemoryViewerPanel> memory_panel_;
     bool is_open_;
     
-    // SDL2/OpenGL backend state
-    SDL_Window* sdl_window_;
-    SDL_GLContext gl_context_;
-    bool sdl_initialized_;
-    bool should_close_;
-    
-    // Rendering helper methods
-    void RenderCPUStatePanel();
-    void RenderFlagsPanel();
-    void RenderMemoryViewer();
-    
-    // Disable copy and assignment
+    // Disable copy
     GBDebugger(const GBDebugger&) = delete;
     GBDebugger& operator=(const GBDebugger&) = delete;
 };

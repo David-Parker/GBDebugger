@@ -31,16 +31,27 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
+# GBDebugger source files
+set(GBDEBUGGER_SOURCES
+    src/GBDebugger.cpp
+    src/DebuggerBackend.cpp
+    src/panels/CPUStatePanel.cpp
+    src/panels/FlagsPanel.cpp
+    src/panels/MemoryViewerPanel.cpp
+)
+
 # GBDebugger library
 add_library(GBDebugger STATIC
-    src/GBDebugger.cpp
+    ${GBDEBUGGER_SOURCES}
     ${IMGUI_SOURCES}
 )
 
+# Public include directories (API headers only)
 target_include_directories(GBDebugger PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# Private include directories (ImGui and internal headers)
 target_include_directories(GBDebugger PRIVATE
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
