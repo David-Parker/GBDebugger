@@ -2,6 +2,8 @@
 
 An emulator-agnostic GameBoy debugger library using Dear ImGui.
 
+![GBDebugger Screenshot](media/screen.png)
+
 ## Overview
 
 GBDebugger provides a graphical debugging interface for GameBoy emulators. It displays CPU state, registers, flags, and memory contents in real-time. The library is designed to work with any GameBoy emulator through a simple, standard C++ API.
