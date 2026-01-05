@@ -52,3 +52,18 @@ if(BUILD_GBDEBUGGER_TESTS)
     enable_testing()
     add_subdirectory(test)
 endif()
+
+# Optional: Build example
+option(BUILD_GBDEBUGGER_EXAMPLE "Build GBDebugger example" ON)
+
+if(BUILD_GBDEBUGGER_EXAMPLE)
+    add_executable(GBDebuggerExample
+        example/example.cpp
+    )
+    
+    target_link_libraries(GBDebuggerExample GBDebugger)
+    
+    target_include_directories(GBDebuggerExample PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
+endif()
