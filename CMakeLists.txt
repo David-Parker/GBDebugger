@@ -35,6 +35,7 @@ set(IMGUI_SOURCES
 set(GBDEBUGGER_SOURCES
     src/GBDebugger.cpp
     src/DebuggerBackend.cpp
+    src/TileDecoder.cpp
     src/panels/CPUStatePanel.cpp
     src/panels/FlagsPanel.cpp
     src/panels/MemoryViewerPanel.cpp
