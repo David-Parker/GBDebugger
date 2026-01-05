@@ -23,12 +23,28 @@ GBDebugger::~GBDebugger() {
 }
 
 bool GBDebugger::Open() {
-    // TODO: Initialize ImGui context and create window
-    // For now, just mark as open
+    // Handle multiple Open() calls gracefully
     if (is_open_) {
-        // Already open, handle gracefully
         return true;
     }
+    
+    // Create ImGui context
+    ImGui::CreateContext();
+    
+    // Check if context was created successfully
+    if (ImGui::GetCurrentContext() == nullptr) {
+        return false;
+    }
+    
+    // Set up minimal ImGui IO state for headless rendering
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1920.0f, 1080.0f);  // Default display size
+    io.DeltaTime = 1.0f / 60.0f;  // Default to 60 FPS
+    
+    // Build font atlas (required by ImGui)
+    unsigned char* pixels;
+    int width, height;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
     
     is_open_ = true;
     return true;
@@ -39,7 +55,9 @@ void GBDebugger::Close() {
         return;
     }
     
-    // TODO: Cleanup ImGui resources
+    // Destroy ImGui context
+    ImGui::DestroyContext();
+    
     is_open_ = false;
 }
 
