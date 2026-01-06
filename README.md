@@ -2,7 +2,7 @@
 
 An emulator-agnostic GameBoy debugger library using Dear ImGui.
 
-![GBDebugger Screenshot](media/screen-1.png)
+![GBDebugger Screenshot](media/screen-2.png)
 
 ## Overview
 
