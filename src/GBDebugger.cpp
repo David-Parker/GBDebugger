@@ -130,6 +130,31 @@ bool GBDebugger::UpdateMemory(const uint8_t* buffer, size_t size) {
     return result;
 }
 
+bool GBDebugger::UpdateColorRAM(const uint8_t* bgPaletteRAM, const uint8_t* objPaletteRAM) {
+    if (bgPaletteRAM == nullptr || objPaletteRAM == nullptr) {
+        return false;
+    }
+    
+    // Convert raw palette RAM bytes to CGBPalette structures
+    // Each palette is 8 bytes (4 colors × 2 bytes per color in RGB555 format)
+    CGBPalette bgPalettes[8];
+    CGBPalette objPalettes[8];
+    
+    for (int pal = 0; pal < 8; pal++) {
+        for (int col = 0; col < 4; col++) {
+            int offset = pal * 8 + col * 2;
+            // RGB555 is stored little-endian: low byte first, then high byte
+            uint16_t color = bgPaletteRAM[offset] | (bgPaletteRAM[offset + 1] << 8);
+            bgPalettes[pal].colors[col] = color;
+            
+            color = objPaletteRAM[offset] | (objPaletteRAM[offset + 1] << 8);
+            objPalettes[pal].colors[col] = color;
+        }
+    }
+    
+    return vram_panel_->UpdatePalettes(bgPalettes, objPalettes);
+}
+
 SDL_Window* GBDebugger::GetWindow() const {
     return backend_->GetWindow();
 }

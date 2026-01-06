@@ -165,6 +165,14 @@ private:
     void InitializeDMGPalette();
     
     /**
+     * Initialize CGB palettes with visible default colors
+     * 
+     * Sets all 8 BG and 8 sprite palettes to a grayscale gradient
+     * so tiles are visible even without actual CGB palette data.
+     */
+    void InitializeCGBDefaultPalettes();
+    
+    /**
      * Convert a CGBPalette to a display-ready Palette
      * 
      * @param cgbPalette Source CGB palette in RGB555 format

@@ -138,6 +138,18 @@ public:
      */
     bool UpdateMemory(const uint8_t* buffer, size_t size);
     
+    /**
+     * Update CGB color palette RAM (CGB only)
+     * 
+     * Provides the raw 64-byte palette RAM for background and sprite palettes.
+     * If not called, default grayscale palettes are used for CGB mode.
+     * 
+     * @param bgPaletteRAM Pointer to 64-byte BG palette RAM (8 palettes × 4 colors × 2 bytes)
+     * @param objPaletteRAM Pointer to 64-byte OBJ palette RAM (8 palettes × 4 colors × 2 bytes)
+     * @return true if successful
+     */
+    bool UpdateColorRAM(const uint8_t* bgPaletteRAM, const uint8_t* objPaletteRAM);
+    
     // ========== Window Access ==========
     
     /**

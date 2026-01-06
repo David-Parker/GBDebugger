@@ -8,13 +8,26 @@ PaletteManager::PaletteManager()
       selectedBGPalette_(0),
       selectedSpritePalette_(0) {
     InitializeDMGPalette();
-    
-    // Initialize CGB palettes to default (all black)
+    InitializeCGBDefaultPalettes();
+}
+
+void PaletteManager::InitializeCGBDefaultPalettes() {
+    // Initialize CGB palettes with a visible grayscale gradient
+    // This ensures tiles are visible even when actual palette data isn't provided.
+    // Each palette uses the same grayscale values as DMG for consistency.
+    // When actual CGB palette data is provided via SetBGPalettes/SetSpritePalettes,
+    // these defaults will be overwritten with the real colors.
     for (int i = 0; i < 8; i++) {
-        for (int c = 0; c < 4; c++) {
-            bgPalettes_[i].colors[c] = TileColor(0, 0, 0, 255);
-            spritePalettes_[i].colors[c] = TileColor(0, 0, 0, 255);
-        }
+        // Use DMG-style grayscale as default
+        bgPalettes_[i].colors[0] = TileColor(255, 255, 255, 255);  // White
+        bgPalettes_[i].colors[1] = TileColor(192, 192, 192, 255);  // Light Gray
+        bgPalettes_[i].colors[2] = TileColor(96, 96, 96, 255);     // Dark Gray
+        bgPalettes_[i].colors[3] = TileColor(0, 0, 0, 255);        // Black
+        
+        spritePalettes_[i].colors[0] = TileColor(255, 255, 255, 255);
+        spritePalettes_[i].colors[1] = TileColor(192, 192, 192, 255);
+        spritePalettes_[i].colors[2] = TileColor(96, 96, 96, 255);
+        spritePalettes_[i].colors[3] = TileColor(0, 0, 0, 255);
     }
 }
 

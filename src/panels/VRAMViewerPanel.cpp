@@ -218,59 +218,20 @@ void VRAMViewerPanel::Render() {
 }
 
 void VRAMViewerPanel::RenderTileGrid() {
-    // Display mode indicator (Requirement 12.5)
+    // Display mode indicator
     ImGui::Text("Mode: %s", state_.mode == EmulationMode::DMG ? "DMG" : "CGB");
-    ImGui::SameLine();
-    
-    // Bank selector for CGB mode (Requirement 2.5)
-    if (state_.mode == EmulationMode::CGB) {
-        ImGui::Text("  Bank:");
-        ImGui::SameLine();
-        if (ImGui::RadioButton("0", state_.currentBank == 0)) {
-            if (state_.currentBank != 0) {
-                state_.currentBank = 0;
-                renderer_->MarkAllDirty();
-                state_.needsRefresh = true;
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::RadioButton("1", state_.currentBank == 1)) {
-            if (state_.currentBank != 1) {
-                state_.currentBank = 1;
-                renderer_->MarkAllDirty();
-                state_.needsRefresh = true;
-            }
-        }
-        ImGui::SameLine();
-        
-        // Palette selector for CGB mode (Requirement 7.6)
-        ImGui::Text("  Palette:");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(60);
-        if (ImGui::Combo("##palette", &state_.selectedPalette, 
-                         "0\0001\0002\0003\0004\0005\0006\0007\0")) {
-            paletteManager_->SetSelectedBGPalette(state_.selectedPalette);
-            renderer_->MarkAllDirty();
-            state_.needsRefresh = true;
-        }
-    }
     
     ImGui::Separator();
     
-    // Calculate tile count based on mode (Requirement 5.5)
-    int tileCount;
-    if (state_.mode == EmulationMode::DMG) {
-        tileCount = DMG_TILE_COUNT;  // 384 tiles in DMG mode
-    } else {
-        // CGB mode: 384 tiles per bank
-        tileCount = (state_.currentBank == 0) ? CGB_BANK0_TILE_COUNT : CGB_BANK1_TILE_COUNT;
-    }
+    // Calculate tile count based on mode
+    // VRAM contains 384 tiles (8KB / 16 bytes per tile)
+    int tileCount = 384;
     
-    // Get the appropriate VRAM buffer
-    const uint8_t* vramBuffer = (state_.currentBank == 0) ? vramBank0_.data() : vramBank1_.data();
+    // Always use bank 0 (the currently mapped VRAM from memory buffer)
+    const uint8_t* vramBuffer = vramBank0_.data();
     
-    // Get the palette for rendering
-    Palette palette = paletteManager_->GetBGPalette(state_.selectedPalette);
+    // Get the palette for rendering (use palette 0 for tile grid display)
+    Palette palette = paletteManager_->GetBGPalette(0);
     
     // Ensure texture pool is initialized with correct parameters
     int numRows = (tileCount + TILES_PER_ROW - 1) / TILES_PER_ROW;
