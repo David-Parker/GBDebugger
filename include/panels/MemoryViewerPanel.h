@@ -38,6 +38,8 @@ public:
     bool Update(const uint8_t* buffer, size_t size);
 
 private:
+    void RenderMemoryRegion(const MemoryRegion& region);
+    
     MemoryState state_;
     bool visible_;
 };

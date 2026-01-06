@@ -35,7 +35,7 @@ public:
      * @param height Initial window height
      * @return true if successful
      */
-    bool Initialize(const char* title = "GBDebugger", int width = 1200, int height = 800);
+    bool Initialize(const char* title, int width, int height);
     
     /**
      * Shutdown and cleanup all resources

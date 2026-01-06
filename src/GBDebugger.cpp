@@ -28,7 +28,7 @@ bool GBDebugger::Open() {
         return true;
     }
     
-    if (!backend_->Initialize("GBDebugger", 1200, 800)) {
+    if (!backend_->Initialize("GBDebugger", 900, 1200)) {
         return false;
     }
     

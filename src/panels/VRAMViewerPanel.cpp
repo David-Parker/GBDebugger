@@ -208,12 +208,10 @@ void VRAMViewerPanel::Render() {
     // Render the tile grid (main content)
     RenderTileGrid();
     
-    // Render tile inspector if a tile is selected (task 8)
-    if (state_.selectedTile >= 0) {
-        RenderTileInspector();
-    }
+    // Render tile inspector (always shown, collapsed by default)
+    RenderTileInspector();
     
-    // Always render sprite view
+    // Always render sprite view (collapsed by default)
     RenderSpriteView();
     
     ImGui::End();
@@ -351,10 +349,10 @@ void VRAMViewerPanel::RenderTileGrid() {
 }
 
 void VRAMViewerPanel::RenderSpriteView() {
-    // Render sprite view in a separate collapsible section
+    // Render sprite view in a separate collapsible section (collapsed by default)
     ImGui::Separator();
     
-    if (ImGui::CollapsingHeader("Sprite View", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Sprite View")) {
         // Parse OAM data using SpriteParser (Requirement 9.2)
         SpriteParser spriteParser;
         auto sprites = spriteParser.ParseOAM(oam_.data(), oam_.size());
@@ -514,10 +512,10 @@ void VRAMViewerPanel::RenderSpriteView() {
 }
 
 void VRAMViewerPanel::RenderTileInspector() {
-    // Render tile inspector in a separate collapsible section
+    // Render tile inspector in a separate collapsible section (collapsed by default)
     ImGui::Separator();
     
-    if (ImGui::CollapsingHeader("Tile Inspector", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Tile Inspector")) {
         // Get the selected tile index
         int tileIndex = state_.selectedTile;
         
