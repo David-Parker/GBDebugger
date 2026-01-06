@@ -1,0 +1,629 @@
+#include "panels/VRAMViewerPanel.h"
+#include "TileDecoder.h"
+#include "TileRenderer.h"
+#include "PaletteManager.h"
+#include "SpriteParser.h"
+#include "imgui.h"
+#include <cstring>
+#include <memory>
+
+namespace GBDebug {
+
+// Constants for VRAM and OAM sizes
+static constexpr size_t VRAM_BANK_SIZE = 8192;
+static constexpr size_t OAM_SIZE = 160;
+static constexpr size_t MAX_VRAM_BANKS = 2;
+static constexpr int TILES_PER_ROW = 16;
+static constexpr int DMG_TILE_COUNT = 384;
+static constexpr int CGB_BANK0_TILE_COUNT = 384;
+static constexpr int CGB_BANK1_TILE_COUNT = 384;
+static constexpr int TILE_DISPLAY_SIZE = 16;  // 8x8 tiles at 2x scale = 16x16 pixels
+static constexpr float TILE_SPACING = 1.0f;  // 1 pixel border between tiles
+
+VRAMViewerPanel::VRAMViewerPanel()
+    : decoder_(new TileDecoder()),
+      renderer_(new TileRenderer()),
+      paletteManager_(new PaletteManager()),
+      visible_(true) {
+    // Initialize VRAM buffers to zero
+    vramBank0_.fill(0);
+    vramBank1_.fill(0);
+    
+    // Initialize OAM buffer to zero
+    oam_.fill(0);
+    
+    // Initialize CGB palettes to default values
+    for (auto& palette : bgPalettes_) {
+        for (int i = 0; i < 4; i++) {
+            palette.colors[i] = 0;
+        }
+    }
+    for (auto& palette : spritePalettes_) {
+        for (int i = 0; i < 4; i++) {
+            palette.colors[i] = 0;
+        }
+    }
+    
+    // Initialize panel state with defaults (handled by VRAMViewerState constructor)
+    // state_ is already default-initialized
+}
+
+VRAMViewerPanel::~VRAMViewerPanel() {
+    // Clean up textures before destroying renderer
+    if (renderer_) {
+        renderer_->ClearTextures();
+    }
+    // unique_ptr members will clean up automatically
+}
+
+const char* VRAMViewerPanel::GetName() const {
+    return "VRAM Tile Viewer";
+}
+
+bool VRAMViewerPanel::IsVisible() const {
+    return visible_;
+}
+
+void VRAMViewerPanel::SetVisible(bool visible) {
+    visible_ = visible;
+}
+
+bool VRAMViewerPanel::UpdateVRAM(const uint8_t* buffer, size_t size, uint8_t bank) {
+    // Validate buffer pointer
+    if (buffer == nullptr) {
+        // Log error: VRAM buffer is null
+        // Gracefully handle without crashing (Requirement 13.1)
+        return false;
+    }
+    
+    // Validate buffer size (Requirement 13.2)
+    if (size != VRAM_BANK_SIZE) {
+        // Log error: Invalid VRAM buffer size
+        return false;
+    }
+    
+    // Validate bank index
+    if (bank > 1) {
+        // Log error: Invalid VRAM bank
+        return false;
+    }
+    
+    // In DMG mode, only bank 0 is used (Requirement 2.4)
+    if (state_.mode == EmulationMode::DMG && bank != 0) {
+        // Silently ignore bank 1 updates in DMG mode
+        return true;
+    }
+    
+    // Copy VRAM data to appropriate bank (Requirements 1.2, 2.2, 2.3)
+    if (bank == 0) {
+        std::memcpy(vramBank0_.data(), buffer, VRAM_BANK_SIZE);
+    } else {
+        std::memcpy(vramBank1_.data(), buffer, VRAM_BANK_SIZE);
+    }
+    
+    // Mark display as needing refresh (Requirement 1.3)
+    state_.needsRefresh = true;
+    
+    return true;
+}
+
+bool VRAMViewerPanel::UpdateOAM(const uint8_t* buffer, size_t size) {
+    // Validate buffer pointer (Requirement 13.3)
+    if (buffer == nullptr) {
+        // Log error: OAM buffer is null
+        // Gracefully handle without crashing
+        return false;
+    }
+    
+    // Validate buffer size (Requirement 13.4)
+    if (size != OAM_SIZE) {
+        // Log error: Invalid OAM buffer size
+        return false;
+    }
+    
+    // Copy OAM data (Requirements 3.1, 3.2)
+    std::memcpy(oam_.data(), buffer, OAM_SIZE);
+    
+    // Mark display as needing refresh (Requirement 3.3)
+    state_.needsRefresh = true;
+    
+    return true;
+}
+
+bool VRAMViewerPanel::UpdatePalettes(const CGBPalette* bgPalettes, const CGBPalette* spritePalettes) {
+    // Validate palette pointers
+    // Note: It's valid to update only one set of palettes
+    bool updated = false;
+    
+    // Update background palettes if provided (Requirement 7.1)
+    if (bgPalettes != nullptr) {
+        for (int i = 0; i < 8; i++) {
+            bgPalettes_[i] = bgPalettes[i];
+        }
+        // Pass palettes to PaletteManager for color conversion
+        if (paletteManager_) {
+            paletteManager_->SetBGPalettes(bgPalettes, 8);
+        }
+        updated = true;
+    }
+    
+    // Update sprite palettes if provided (Requirement 7.5)
+    if (spritePalettes != nullptr) {
+        for (int i = 0; i < 8; i++) {
+            spritePalettes_[i] = spritePalettes[i];
+        }
+        // Pass palettes to PaletteManager for color conversion
+        if (paletteManager_) {
+            paletteManager_->SetSpritePalettes(spritePalettes, 8);
+        }
+        updated = true;
+    }
+    
+    if (updated) {
+        // Mark all tiles as dirty since palette changed
+        if (renderer_) {
+            renderer_->MarkAllDirty();
+        }
+        // Mark display as needing refresh
+        state_.needsRefresh = true;
+    }
+    
+    return updated;
+}
+
+void VRAMViewerPanel::SetEmulationMode(EmulationMode mode) {
+    // Only update if mode actually changed
+    if (state_.mode != mode) {
+        state_.mode = mode;
+        
+        // Update palette manager mode
+        if (paletteManager_) {
+            paletteManager_->SetMode(mode);
+        }
+        
+        // Reset bank to 0 when switching modes (Requirement 12.1)
+        state_.currentBank = 0;
+        
+        // Mark all tiles as dirty since palette mode changed
+        if (renderer_) {
+            renderer_->MarkAllDirty();
+        }
+        
+        // Mark display as needing refresh (Requirements 12.2, 12.3, 12.4)
+        state_.needsRefresh = true;
+    }
+}
+
+void VRAMViewerPanel::Render() {
+    if (!visible_) {
+        return;
+    }
+    
+    // Set initial window position and size (only on first use)
+    ImGui::SetNextWindowPos(ImVec2(10, 240), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(580, 450), ImGuiCond_FirstUseEver);
+    
+    ImGui::Begin(GetName());
+    
+    // Render the tile grid (main content)
+    RenderTileGrid();
+    
+    // Render tile inspector if a tile is selected (task 8)
+    if (state_.selectedTile >= 0) {
+        RenderTileInspector();
+    }
+    
+    // Render sprite view if enabled (task 9)
+    if (state_.showSprites) {
+        RenderSpriteView();
+    }
+    
+    ImGui::End();
+}
+
+void VRAMViewerPanel::RenderTileGrid() {
+    // Display mode indicator (Requirement 12.5)
+    ImGui::Text("Mode: %s", state_.mode == EmulationMode::DMG ? "DMG" : "CGB");
+    ImGui::SameLine();
+    
+    // Bank selector for CGB mode (Requirement 2.5)
+    if (state_.mode == EmulationMode::CGB) {
+        ImGui::Text("  Bank:");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("0", state_.currentBank == 0)) {
+            if (state_.currentBank != 0) {
+                state_.currentBank = 0;
+                renderer_->MarkAllDirty();
+                state_.needsRefresh = true;
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("1", state_.currentBank == 1)) {
+            if (state_.currentBank != 1) {
+                state_.currentBank = 1;
+                renderer_->MarkAllDirty();
+                state_.needsRefresh = true;
+            }
+        }
+        ImGui::SameLine();
+        
+        // Palette selector for CGB mode (Requirement 7.6)
+        ImGui::Text("  Palette:");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(60);
+        if (ImGui::Combo("##palette", &state_.selectedPalette, 
+                         "0\0001\0002\0003\0004\0005\0006\0007\0")) {
+            paletteManager_->SetSelectedBGPalette(state_.selectedPalette);
+            renderer_->MarkAllDirty();
+            state_.needsRefresh = true;
+        }
+    }
+    
+    // Sprite view toggle (Requirement 9.1)
+    ImGui::SameLine();
+    ImGui::Text("  ");
+    ImGui::SameLine();
+    ImGui::Checkbox("Show Sprites", &state_.showSprites);
+    
+    ImGui::Separator();
+    
+    // Calculate tile count based on mode (Requirement 5.5)
+    int tileCount;
+    if (state_.mode == EmulationMode::DMG) {
+        tileCount = DMG_TILE_COUNT;  // 384 tiles in DMG mode
+    } else {
+        // CGB mode: 384 tiles per bank
+        tileCount = (state_.currentBank == 0) ? CGB_BANK0_TILE_COUNT : CGB_BANK1_TILE_COUNT;
+    }
+    
+    // Get the appropriate VRAM buffer
+    const uint8_t* vramBuffer = (state_.currentBank == 0) ? vramBank0_.data() : vramBank1_.data();
+    
+    // Get the palette for rendering
+    Palette palette = paletteManager_->GetBGPalette(state_.selectedPalette);
+    
+    // Create scrollable child region for tile grid (Requirement 5.4)
+    ImGui::BeginChild("TileGrid", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
+    
+    // Set tight spacing for tile grid
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(TILE_SPACING, TILE_SPACING));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
+    
+    // Render tiles in rows of 16 (Requirement 5.6)
+    for (int i = 0; i < tileCount; i++) {
+        // Start new row every TILES_PER_ROW tiles
+        if (i % TILES_PER_ROW != 0) {
+            ImGui::SameLine(0, TILE_SPACING);
+        }
+        
+        // Decode tile from VRAM
+        auto pixelData = decoder_->DecodeTile(vramBuffer, static_cast<uint16_t>(i), state_.currentBank);
+        
+        // Render tile to texture
+        unsigned int texture = renderer_->RenderTile(pixelData, palette, state_.tileScale);
+        
+        // Display tile using ImGui::Image with invisible button for selection
+        ImGui::PushID(i);
+        
+        // Get cursor position for drawing selection highlight
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        
+        // Draw selection highlight behind the tile
+        if (state_.selectedTile == i) {
+            ImDrawList* drawList = ImGui::GetWindowDrawList();
+            drawList->AddRectFilled(
+                ImVec2(pos.x - 1, pos.y - 1),
+                ImVec2(pos.x + TILE_DISPLAY_SIZE + 1, pos.y + TILE_DISPLAY_SIZE + 1),
+                IM_COL32(100, 150, 200, 255)
+            );
+        }
+        
+        // Display tile image
+        ImGui::Image((void*)(intptr_t)texture, ImVec2(TILE_DISPLAY_SIZE, TILE_DISPLAY_SIZE));
+        
+        // Make the image clickable for selection
+        if (ImGui::IsItemClicked()) {
+            state_.selectedTile = i;
+        }
+        
+        // Show tile index on hover (Requirement 5.3)
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::Text("Tile %d (0x%03X)", i, i);
+            uint16_t address = decoder_->GetTileAddress(static_cast<uint16_t>(i));
+            ImGui::Text("Address: 0x%04X", address);
+            ImGui::EndTooltip();
+        }
+        
+        ImGui::PopID();
+    }
+    
+    ImGui::PopStyleVar(2);
+    ImGui::EndChild();
+    
+    // Clear refresh flag
+    state_.needsRefresh = false;
+}
+
+void VRAMViewerPanel::RenderSpriteView() {
+    // Render sprite view in a separate collapsible section
+    ImGui::Separator();
+    
+    if (ImGui::CollapsingHeader("Sprite View", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Parse OAM data using SpriteParser (Requirement 9.2)
+        SpriteParser spriteParser;
+        auto sprites = spriteParser.ParseOAM(oam_.data(), oam_.size());
+        
+        // Display sprite count
+        ImGui::Text("Sprites: %zu / 40", sprites.size());
+        ImGui::SameLine();
+        
+        // Add checkbox for 8x16 sprite mode (Requirement 9.5)
+        static bool sprite8x16Mode = false;
+        ImGui::Checkbox("8x16 Mode", &sprite8x16Mode);
+        
+        ImGui::Separator();
+        
+        // Create scrollable child region for sprite list
+        ImGui::BeginChild("SpriteList", ImVec2(0, 300), true, ImGuiWindowFlags_HorizontalScrollbar);
+        
+        // Display sprites in a grid layout (Requirement 9.1)
+        const int spritesPerRow = 8;
+        const int spriteDisplaySize = 32;  // 8x8 scaled 4x
+        const int sprite8x16DisplayHeight = 64;  // 8x16 scaled 4x
+        
+        int visibleCount = 0;
+        
+        for (size_t i = 0; i < sprites.size(); i++) {
+            const SpriteAttributes& sprite = sprites[i];
+            
+            // Start new row every spritesPerRow sprites
+            if (i % spritesPerRow != 0) {
+                ImGui::SameLine();
+            }
+            
+            ImGui::BeginGroup();
+            ImGui::PushID(static_cast<int>(i));
+            
+            // Get the appropriate VRAM buffer based on sprite's VRAM bank (CGB only)
+            const uint8_t* vramBuffer;
+            if (state_.mode == EmulationMode::CGB && sprite.vramBank == 1) {
+                vramBuffer = vramBank1_.data();
+            } else {
+                vramBuffer = vramBank0_.data();
+            }
+            
+            // Get the appropriate palette for this sprite (Requirement 9.3)
+            Palette palette;
+            if (state_.mode == EmulationMode::CGB) {
+                // CGB mode: use bits 0-2 of flags for palette number
+                uint8_t cgbPaletteNum = sprite.flags & 0x07;
+                palette = paletteManager_->GetSpritePalette(cgbPaletteNum);
+            } else {
+                // DMG mode: use bit 4 for palette selection (OBP0 or OBP1)
+                palette = paletteManager_->GetSpritePalette(sprite.paletteNumber);
+            }
+            
+            // Decode and render the sprite tile
+            uint16_t tileIndex = sprite.tileIndex;
+            
+            // In 8x16 mode, the LSB of tile index is ignored (Requirement 9.5)
+            if (sprite8x16Mode) {
+                tileIndex &= 0xFE;  // Clear bit 0 for top tile
+            }
+            
+            // Decode the tile with flip flags applied
+            auto pixelData = decoder_->DecodeTile(vramBuffer, tileIndex, sprite.vramBank);
+            
+            // Apply flip transformations if needed
+            if (sprite.xFlip || sprite.yFlip) {
+                std::array<std::array<uint8_t, 8>, 8> flippedData;
+                for (int y = 0; y < 8; y++) {
+                    for (int x = 0; x < 8; x++) {
+                        int srcX = sprite.xFlip ? (7 - x) : x;
+                        int srcY = sprite.yFlip ? (7 - y) : y;
+                        flippedData[y][x] = pixelData[srcY][srcX];
+                    }
+                }
+                pixelData = flippedData;
+            }
+            
+            // Render the sprite tile
+            unsigned int texture = renderer_->RenderTile(pixelData, palette, 4);
+            
+            // Display the sprite tile
+            if (sprite8x16Mode) {
+                // 8x16 mode: render both tiles vertically (Requirement 9.5)
+                ImGui::Image((void*)(intptr_t)texture, ImVec2(spriteDisplaySize, spriteDisplaySize));
+                
+                // Decode and render the bottom tile (tileIndex + 1)
+                uint16_t bottomTileIndex = tileIndex | 0x01;  // Set bit 0 for bottom tile
+                auto bottomPixelData = decoder_->DecodeTile(vramBuffer, bottomTileIndex, sprite.vramBank);
+                
+                // Apply flip transformations to bottom tile
+                if (sprite.xFlip || sprite.yFlip) {
+                    std::array<std::array<uint8_t, 8>, 8> flippedData;
+                    for (int y = 0; y < 8; y++) {
+                        for (int x = 0; x < 8; x++) {
+                            int srcX = sprite.xFlip ? (7 - x) : x;
+                            int srcY = sprite.yFlip ? (7 - y) : y;
+                            flippedData[y][x] = bottomPixelData[srcY][srcX];
+                        }
+                    }
+                    bottomPixelData = flippedData;
+                }
+                
+                // In 8x16 mode with Y flip, swap top and bottom tiles
+                if (sprite.yFlip) {
+                    // Swap: bottom tile goes on top
+                    unsigned int bottomTexture = renderer_->RenderTile(bottomPixelData, palette, 4);
+                    // The top texture was already rendered, now render bottom below
+                    ImGui::Image((void*)(intptr_t)bottomTexture, ImVec2(spriteDisplaySize, spriteDisplaySize));
+                } else {
+                    unsigned int bottomTexture = renderer_->RenderTile(bottomPixelData, palette, 4);
+                    ImGui::Image((void*)(intptr_t)bottomTexture, ImVec2(spriteDisplaySize, spriteDisplaySize));
+                }
+            } else {
+                // 8x8 mode: render single tile
+                ImGui::Image((void*)(intptr_t)texture, ImVec2(spriteDisplaySize, spriteDisplaySize));
+            }
+            
+            // Show sprite info on hover (Requirement 9.3)
+            if (ImGui::IsItemHovered()) {
+                ImGui::BeginTooltip();
+                ImGui::Text("Sprite %zu", i);
+                ImGui::Separator();
+                
+                // Display sprite position (Requirement 9.3)
+                // Screen position: Y = sprite.y - 16, X = sprite.x - 8
+                int screenY = static_cast<int>(sprite.y) - 16;
+                int screenX = static_cast<int>(sprite.x) - 8;
+                ImGui::Text("Position: (%d, %d)", screenX, screenY);
+                ImGui::Text("Raw Y/X: (%d, %d)", sprite.y, sprite.x);
+                
+                // Display tile index
+                ImGui::Text("Tile: %d (0x%02X)", sprite.tileIndex, sprite.tileIndex);
+                
+                // Display palette info (Requirement 9.3)
+                if (state_.mode == EmulationMode::CGB) {
+                    uint8_t cgbPaletteNum = sprite.flags & 0x07;
+                    ImGui::Text("Palette: OBP%d", cgbPaletteNum);
+                    ImGui::Text("VRAM Bank: %d", sprite.vramBank);
+                } else {
+                    ImGui::Text("Palette: OBP%d", sprite.paletteNumber);
+                }
+                
+                // Display flip flags (Requirement 9.3)
+                ImGui::Text("Flip: %s%s", 
+                    sprite.xFlip ? "H" : "-",
+                    sprite.yFlip ? "V" : "-");
+                
+                // Display priority
+                ImGui::Text("Priority: %s", sprite.priority ? "Behind BG" : "Above BG");
+                
+                // Display visibility status
+                bool visible = spriteParser.IsSpriteVisible(sprite);
+                ImGui::Text("Visible: %s", visible ? "Yes" : "No");
+                
+                ImGui::EndTooltip();
+            }
+            
+            // Display sprite index below the tile
+            ImGui::Text("%02zu", i);
+            
+            ImGui::PopID();
+            ImGui::EndGroup();
+            
+            // Count visible sprites
+            if (spriteParser.IsSpriteVisible(sprite)) {
+                visibleCount++;
+            }
+        }
+        
+        ImGui::EndChild();
+        
+        // Display visible sprite count
+        ImGui::Text("Visible on screen: %d / 40", visibleCount);
+    }
+}
+
+void VRAMViewerPanel::RenderTileInspector() {
+    // Render tile inspector in a separate collapsible section
+    ImGui::Separator();
+    
+    if (ImGui::CollapsingHeader("Tile Inspector", ImGuiTreeNodeFlags_DefaultOpen)) {
+        // Get the selected tile index
+        int tileIndex = state_.selectedTile;
+        
+        // Display tile index (Requirement 8.2)
+        ImGui::Text("Selected Tile: %d (0x%03X)", tileIndex, tileIndex);
+        
+        // Calculate and display VRAM address range (Requirement 8.3)
+        uint16_t startAddress = decoder_->GetTileAddress(static_cast<uint16_t>(tileIndex));
+        uint16_t endAddress = startAddress + 15;  // 16 bytes per tile (0-15 offset)
+        ImGui::Text("VRAM Address: 0x%04X - 0x%04X", startAddress, endAddress);
+        
+        // Display bank info for CGB mode
+        if (state_.mode == EmulationMode::CGB) {
+            ImGui::Text("Bank: %d", state_.currentBank);
+        }
+        
+        ImGui::Spacing();
+        
+        // Render selected tile at larger scale (Requirement 8.4)
+        // Use 8x scale for inspector view (64x64 pixels)
+        const int inspectorScale = 8;
+        const int inspectorTileSize = 8 * inspectorScale;  // 64 pixels
+        
+        // Get the appropriate VRAM buffer
+        const uint8_t* vramBuffer = (state_.currentBank == 0) ? vramBank0_.data() : vramBank1_.data();
+        
+        // Decode the tile
+        auto pixelData = decoder_->DecodeTile(vramBuffer, static_cast<uint16_t>(tileIndex), state_.currentBank);
+        
+        // Get the palette for rendering
+        Palette palette = paletteManager_->GetBGPalette(state_.selectedPalette);
+        
+        // Render tile at larger scale
+        unsigned int texture = renderer_->RenderTile(pixelData, palette, inspectorScale);
+        
+        // Display the enlarged tile
+        ImGui::Text("Preview (8x scale):");
+        ImGui::Image((void*)(intptr_t)texture, ImVec2(inspectorTileSize, inspectorTileSize));
+        
+        ImGui::Spacing();
+        
+        // Display raw byte data (Requirement 8.5)
+        ImGui::Text("Raw Tile Data (16 bytes):");
+        
+        // Calculate the offset within the VRAM buffer
+        // The tile address is 0x8000 + (tileIndex * 16), but our buffer starts at 0x8000
+        // So the offset is just tileIndex * 16
+        size_t tileOffset = static_cast<size_t>(tileIndex) * 16;
+        
+        // Ensure we don't read past the buffer
+        if (tileOffset + 16 <= VRAM_BANK_SIZE) {
+            const uint8_t* tileData = vramBuffer + tileOffset;
+            
+            // Display bytes in two rows of 8 bytes each for readability
+            // Row format: "Row N: XX XX XX XX XX XX XX XX  (LSB MSB pairs)"
+            ImGui::BeginChild("TileBytes", ImVec2(0, 80), true);
+            
+            // Display as 8 rows (one per tile row), showing LSB and MSB bytes
+            for (int row = 0; row < 8; row++) {
+                uint8_t lsb = tileData[row * 2];      // Low byte
+                uint8_t msb = tileData[row * 2 + 1];  // High byte
+                ImGui::Text("Row %d: %02X %02X", row, lsb, msb);
+                
+                // Show on same line for compact display
+                if (row < 7) {
+                    if ((row % 2) == 0) {
+                        ImGui::SameLine(150);  // Align second column
+                    }
+                }
+            }
+            
+            ImGui::EndChild();
+            
+            // Also show all 16 bytes in a single line for easy copying
+            ImGui::Text("Hex: ");
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.9f, 1.0f),
+                "%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                tileData[0], tileData[1], tileData[2], tileData[3],
+                tileData[4], tileData[5], tileData[6], tileData[7],
+                tileData[8], tileData[9], tileData[10], tileData[11],
+                tileData[12], tileData[13], tileData[14], tileData[15]);
+        } else {
+            ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Error: Tile data out of bounds");
+        }
+        
+        // Add a button to deselect the tile
+        ImGui::Spacing();
+        if (ImGui::Button("Clear Selection")) {
+            state_.selectedTile = -1;
+        }
+    }
+}
+
+} // namespace GBDebug

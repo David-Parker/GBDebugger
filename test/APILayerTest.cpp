@@ -104,16 +104,18 @@ void testRender() {
     
     GBDebugger debugger;
     
-    // Test Render before Open() - should be safe
+    // Test Render before Open() - should be safe (no-op)
     debugger.Render();
     
     // Open debugger
     debugger.Open();
     
-    // Test Render after Open()
+    // Test Render with proper frame management
+    debugger.BeginFrame();
     debugger.Render();
+    debugger.EndFrame();
     
-    // Close and test Render again
+    // Close and test Render again - should be safe (no-op)
     debugger.Close();
     debugger.Render();
     

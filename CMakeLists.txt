@@ -36,10 +36,14 @@ set(GBDEBUGGER_SOURCES
     src/GBDebugger.cpp
     src/DebuggerBackend.cpp
     src/TileDecoder.cpp
+    src/TileRenderer.cpp
+    src/PaletteManager.cpp
+    src/SpriteParser.cpp
     src/panels/CPUStatePanel.cpp
     src/panels/FlagsPanel.cpp
     src/panels/MemoryViewerPanel.cpp
     src/panels/ControlPanel.cpp
+    src/panels/VRAMViewerPanel.cpp
 )
 
 # GBDebugger library

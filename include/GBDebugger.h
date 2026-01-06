@@ -18,6 +18,11 @@ class CPUStatePanel;
 class FlagsPanel;
 class MemoryViewerPanel;
 class ControlPanel;
+class VRAMViewerPanel;
+
+// Forward declarations for VRAM viewer types
+enum class EmulationMode;
+struct CGBPalette;
 
 /**
  * GBDebugger - Emulator-agnostic GameBoy debugger
@@ -114,14 +119,16 @@ public:
     /**
      * Update CPU state
      */
-    void UpdateCPU(uint64_t cycle, 
-                   uint16_t pc, 
-                   uint16_t sp,
-                   uint16_t af, 
-                   uint16_t bc, 
-                   uint16_t de, 
-                   uint16_t hl,
-                   bool ime);
+    void UpdateCPU(
+        uint64_t cycle,
+        uint16_t pc,
+        uint16_t sp,
+        uint16_t af,
+        uint16_t bc,
+        uint16_t de,
+        uint16_t hl,
+        bool ime
+    );
     
     /**
      * Update memory state
@@ -184,14 +191,6 @@ public:
      * Decrease speed: 8x -> 4x -> 2x -> 1x -> 1/2x -> 1/4x -> 1/8x
      */
     void CycleSpeedDown();
-    
-    // ========== Legacy Compatibility ==========
-    
-    /**
-     * Initialize SDL backend (legacy - now called automatically by Open())
-     * @deprecated Use Open() instead
-     */
-    bool InitSDL();
 
 private:
     std::unique_ptr<DebuggerBackend> backend_;
@@ -199,6 +198,7 @@ private:
     std::unique_ptr<FlagsPanel> flags_panel_;
     std::unique_ptr<MemoryViewerPanel> memory_panel_;
     std::unique_ptr<ControlPanel> control_panel_;
+    std::unique_ptr<VRAMViewerPanel> vram_panel_;
     bool is_open_;
     
     // Disable copy

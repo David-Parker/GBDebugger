@@ -5,6 +5,7 @@
 #include "panels/FlagsPanel.h"
 #include "panels/MemoryViewerPanel.h"
 #include "panels/ControlPanel.h"
+#include "panels/VRAMViewerPanel.h"
 
 namespace GBDebug {
 
@@ -14,6 +15,7 @@ GBDebugger::GBDebugger()
     , flags_panel_(new FlagsPanel())
     , memory_panel_(new MemoryViewerPanel())
     , control_panel_(new ControlPanel())
+    , vram_panel_(new VRAMViewerPanel())
     , is_open_(false) {
 }
 
@@ -70,6 +72,7 @@ void GBDebugger::Render() {
     flags_panel_->Render();
     memory_panel_->Render();
     control_panel_->Render();
+    vram_panel_->Render();
 }
 
 void GBDebugger::EndFrame() {
@@ -78,14 +81,16 @@ void GBDebugger::EndFrame() {
     }
 }
 
-void GBDebugger::UpdateCPU(uint64_t cycle, 
-                           uint16_t pc, 
-                           uint16_t sp,
-                           uint16_t af, 
-                           uint16_t bc, 
-                           uint16_t de, 
-                           uint16_t hl,
-                           bool ime) {
+void GBDebugger::UpdateCPU(
+    uint64_t cycle,
+    uint16_t pc,
+    uint16_t sp,
+    uint16_t af,
+    uint16_t bc,
+    uint16_t de,
+    uint16_t hl,
+    bool ime
+) {
     CPUState state;
     state.cycle = cycle;
     state.pc = pc;
@@ -101,16 +106,32 @@ void GBDebugger::UpdateCPU(uint64_t cycle,
 }
 
 bool GBDebugger::UpdateMemory(const uint8_t* buffer, size_t size) {
-    return memory_panel_->Update(buffer, size);
+    bool result = memory_panel_->Update(buffer, size);
+    
+    // Also update VRAM panel with the same memory buffer
+    // VRAM panel will extract VRAM (0x8000-0x9FFF) and OAM (0xFE00-0xFE9F) from it
+    if (result && buffer != nullptr && size == 65536) {
+        // Auto-detect CGB mode from cartridge header (0x0143)
+        // 0x80 = CGB compatible, 0xC0 = CGB only
+        uint8_t cgbFlag = buffer[0x0143];
+        if (cgbFlag == 0x80 || cgbFlag == 0xC0) {
+            vram_panel_->SetEmulationMode(EmulationMode::CGB);
+        } else {
+            vram_panel_->SetEmulationMode(EmulationMode::DMG);
+        }
+        
+        // Extract VRAM (0x8000-0x9FFF = 8KB)
+        vram_panel_->UpdateVRAM(buffer + 0x8000, 8192, 0);
+        
+        // Extract OAM (0xFE00-0xFE9F = 160 bytes)
+        vram_panel_->UpdateOAM(buffer + 0xFE00, 160);
+    }
+    
+    return result;
 }
 
 SDL_Window* GBDebugger::GetWindow() const {
     return backend_->GetWindow();
-}
-
-bool GBDebugger::InitSDL() {
-    // Legacy compatibility - just call Open()
-    return Open();
 }
 
 bool GBDebugger::IsRunning() const {

@@ -1,4 +1,5 @@
 #include "../include/GBDebugger.h"
+#include "../include/DebuggerTypes.h"
 #include <iostream>
 #include <cassert>
 

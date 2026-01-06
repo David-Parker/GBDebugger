@@ -4,8 +4,14 @@
 #include "IDebuggerPanel.h"
 #include <cstdint>
 #include <array>
+#include <memory>
 
 namespace GBDebug {
+
+// Forward declarations
+class TileDecoder;
+class TileRenderer;
+class PaletteManager;
 
 /**
  * EmulationMode - Specifies the Game Boy hardware mode
@@ -20,16 +26,17 @@ enum class EmulationMode {
 };
 
 /**
- * Color - RGBA color value for tile rendering
+ * TileColor - RGBA color value for tile rendering
  * 
  * Represents a single color in 8-bit RGBA format. Used for both DMG
  * grayscale palettes and CGB RGB palettes after conversion from RGB555.
+ * Named TileColor to avoid conflict with Color in DebuggerTypes.h.
  */
-struct Color {
+struct TileColor {
     uint8_t r, g, b, a;
     
-    Color() : r(0), g(0), b(0), a(255) {}
-    Color(uint8_t r_, uint8_t g_, uint8_t b_, uint8_t a_ = 255) 
+    TileColor() : r(0), g(0), b(0), a(255) {}
+    TileColor(uint8_t r_, uint8_t g_, uint8_t b_, uint8_t a_ = 255) 
         : r(r_), g(g_), b(b_), a(a_) {}
 };
 
@@ -41,7 +48,7 @@ struct Color {
  * In CGB mode, this is one of 8 background or 8 sprite palettes.
  */
 struct Palette {
-    Color colors[4];
+    TileColor colors[4];
     
     Palette() = default;
 };
@@ -116,7 +123,7 @@ struct VRAMViewerState {
           selectedPalette(0),
           showSprites(false),
           showGrid(true),
-          tileScale(4),
+          tileScale(2),
           needsRefresh(true) {}
 };
 
@@ -194,6 +201,11 @@ private:
     void RenderTileGrid();
     void RenderSpriteView();
     void RenderTileInspector();
+    
+    // Helper components
+    std::unique_ptr<TileDecoder> decoder_;
+    std::unique_ptr<TileRenderer> renderer_;
+    std::unique_ptr<PaletteManager> paletteManager_;
     
     // VRAM storage (8KB per bank)
     std::array<uint8_t, 8192> vramBank0_;
