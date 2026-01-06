@@ -213,10 +213,8 @@ void VRAMViewerPanel::Render() {
         RenderTileInspector();
     }
     
-    // Render sprite view if enabled (task 9)
-    if (state_.showSprites) {
-        RenderSpriteView();
-    }
+    // Always render sprite view
+    RenderSpriteView();
     
     ImGui::End();
 }
@@ -259,12 +257,6 @@ void VRAMViewerPanel::RenderTileGrid() {
         }
     }
     
-    // Sprite view toggle (Requirement 9.1)
-    ImGui::SameLine();
-    ImGui::Text("  ");
-    ImGui::SameLine();
-    ImGui::Checkbox("Show Sprites", &state_.showSprites);
-    
     ImGui::Separator();
     
     // Calculate tile count based on mode (Requirement 5.5)
@@ -286,8 +278,13 @@ void VRAMViewerPanel::RenderTileGrid() {
     int numRows = (tileCount + TILES_PER_ROW - 1) / TILES_PER_ROW;
     renderer_->InitializeTileGridPool(numRows, TILES_PER_ROW, state_.tileScale);
     
-    // Create scrollable child region for tile grid (Requirement 5.4)
-    ImGui::BeginChild("TileGrid", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
+    // Calculate the exact height needed for the tile grid
+    // Each tile is TILE_DISPLAY_SIZE pixels + TILE_SPACING between rows
+    float gridHeight = numRows * (TILE_DISPLAY_SIZE + TILE_SPACING) + 32.0f;  // +32 for vertical padding
+    float gridWidth = TILES_PER_ROW * (TILE_DISPLAY_SIZE + TILE_SPACING) + 16.0f;  // +16 for horizontal padding
+    
+    // Create scrollable child region for tile grid with calculated size
+    ImGui::BeginChild("TileGrid", ImVec2(gridWidth, gridHeight), true, ImGuiWindowFlags_HorizontalScrollbar);
     
     // Set tight spacing for tile grid
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(TILE_SPACING, TILE_SPACING));
