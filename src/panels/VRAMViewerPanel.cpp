@@ -44,8 +44,8 @@ VRAMViewerPanel::VRAMViewerPanel()
         }
     }
     
-    // Initialize panel state with defaults (handled by VRAMViewerState constructor)
-    // state_ is already default-initialized
+    // NOTE: Texture pools are initialized lazily in Render methods
+    // because OpenGL context may not be available at construction time
 }
 
 VRAMViewerPanel::~VRAMViewerPanel() {
@@ -282,6 +282,10 @@ void VRAMViewerPanel::RenderTileGrid() {
     // Get the palette for rendering
     Palette palette = paletteManager_->GetBGPalette(state_.selectedPalette);
     
+    // Ensure texture pool is initialized with correct parameters
+    int numRows = (tileCount + TILES_PER_ROW - 1) / TILES_PER_ROW;
+    renderer_->InitializeTileGridPool(numRows, TILES_PER_ROW, state_.tileScale);
+    
     // Create scrollable child region for tile grid (Requirement 5.4)
     ImGui::BeginChild("TileGrid", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
     
@@ -291,16 +295,20 @@ void VRAMViewerPanel::RenderTileGrid() {
     
     // Render tiles in rows of 16 (Requirement 5.6)
     for (int i = 0; i < tileCount; i++) {
+        // Calculate row and column for texture pool
+        int row = i / TILES_PER_ROW;
+        int col = i % TILES_PER_ROW;
+        
         // Start new row every TILES_PER_ROW tiles
-        if (i % TILES_PER_ROW != 0) {
+        if (col != 0) {
             ImGui::SameLine(0, TILE_SPACING);
         }
         
         // Decode tile from VRAM
         auto pixelData = decoder_->DecodeTile(vramBuffer, static_cast<uint16_t>(i), state_.currentBank);
         
-        // Render tile to texture
-        unsigned int texture = renderer_->RenderTile(pixelData, palette, state_.tileScale);
+        // Render tile to texture using pool-based method (no memory leak)
+        unsigned int texture = renderer_->RenderTileAt(row, col, pixelData, palette);
         
         // Display tile using ImGui::Image with invisible button for selection
         ImGui::PushID(i);
@@ -364,13 +372,15 @@ void VRAMViewerPanel::RenderSpriteView() {
         
         ImGui::Separator();
         
+        // Ensure sprite pool is initialized
+        renderer_->InitializeSpritePool(40, 4);
+        
         // Create scrollable child region for sprite list
         ImGui::BeginChild("SpriteList", ImVec2(0, 300), true, ImGuiWindowFlags_HorizontalScrollbar);
         
         // Display sprites in a grid layout (Requirement 9.1)
         const int spritesPerRow = 8;
         const int spriteDisplaySize = 32;  // 8x8 scaled 4x
-        const int sprite8x16DisplayHeight = 64;  // 8x16 scaled 4x
         
         int visibleCount = 0;
         
@@ -396,11 +406,9 @@ void VRAMViewerPanel::RenderSpriteView() {
             // Get the appropriate palette for this sprite (Requirement 9.3)
             Palette palette;
             if (state_.mode == EmulationMode::CGB) {
-                // CGB mode: use bits 0-2 of flags for palette number
                 uint8_t cgbPaletteNum = sprite.flags & 0x07;
                 palette = paletteManager_->GetSpritePalette(cgbPaletteNum);
             } else {
-                // DMG mode: use bit 4 for palette selection (OBP0 or OBP1)
                 palette = paletteManager_->GetSpritePalette(sprite.paletteNumber);
             }
             
@@ -409,7 +417,7 @@ void VRAMViewerPanel::RenderSpriteView() {
             
             // In 8x16 mode, the LSB of tile index is ignored (Requirement 9.5)
             if (sprite8x16Mode) {
-                tileIndex &= 0xFE;  // Clear bit 0 for top tile
+                tileIndex &= 0xFE;
             }
             
             // Decode the tile with flip flags applied
@@ -428,8 +436,8 @@ void VRAMViewerPanel::RenderSpriteView() {
                 pixelData = flippedData;
             }
             
-            // Render the sprite tile
-            unsigned int texture = renderer_->RenderTile(pixelData, palette, 4);
+            // Render the sprite tile using pool-based method (no memory leak)
+            unsigned int texture = renderer_->RenderSpriteAt(static_cast<int>(i), pixelData, palette, false);
             
             // Display the sprite tile
             if (sprite8x16Mode) {
@@ -437,7 +445,7 @@ void VRAMViewerPanel::RenderSpriteView() {
                 ImGui::Image((void*)(intptr_t)texture, ImVec2(spriteDisplaySize, spriteDisplaySize));
                 
                 // Decode and render the bottom tile (tileIndex + 1)
-                uint16_t bottomTileIndex = tileIndex | 0x01;  // Set bit 0 for bottom tile
+                uint16_t bottomTileIndex = tileIndex | 0x01;
                 auto bottomPixelData = decoder_->DecodeTile(vramBuffer, bottomTileIndex, sprite.vramBank);
                 
                 // Apply flip transformations to bottom tile
@@ -453,16 +461,9 @@ void VRAMViewerPanel::RenderSpriteView() {
                     bottomPixelData = flippedData;
                 }
                 
-                // In 8x16 mode with Y flip, swap top and bottom tiles
-                if (sprite.yFlip) {
-                    // Swap: bottom tile goes on top
-                    unsigned int bottomTexture = renderer_->RenderTile(bottomPixelData, palette, 4);
-                    // The top texture was already rendered, now render bottom below
-                    ImGui::Image((void*)(intptr_t)bottomTexture, ImVec2(spriteDisplaySize, spriteDisplaySize));
-                } else {
-                    unsigned int bottomTexture = renderer_->RenderTile(bottomPixelData, palette, 4);
-                    ImGui::Image((void*)(intptr_t)bottomTexture, ImVec2(spriteDisplaySize, spriteDisplaySize));
-                }
+                // Render bottom tile using pool-based method
+                unsigned int bottomTexture = renderer_->RenderSpriteAt(static_cast<int>(i), bottomPixelData, palette, true);
+                ImGui::Image((void*)(intptr_t)bottomTexture, ImVec2(spriteDisplaySize, spriteDisplaySize));
             } else {
                 // 8x8 mode: render single tile
                 ImGui::Image((void*)(intptr_t)texture, ImVec2(spriteDisplaySize, spriteDisplaySize));
@@ -474,17 +475,12 @@ void VRAMViewerPanel::RenderSpriteView() {
                 ImGui::Text("Sprite %zu", i);
                 ImGui::Separator();
                 
-                // Display sprite position (Requirement 9.3)
-                // Screen position: Y = sprite.y - 16, X = sprite.x - 8
                 int screenY = static_cast<int>(sprite.y) - 16;
                 int screenX = static_cast<int>(sprite.x) - 8;
                 ImGui::Text("Position: (%d, %d)", screenX, screenY);
                 ImGui::Text("Raw Y/X: (%d, %d)", sprite.y, sprite.x);
-                
-                // Display tile index
                 ImGui::Text("Tile: %d (0x%02X)", sprite.tileIndex, sprite.tileIndex);
                 
-                // Display palette info (Requirement 9.3)
                 if (state_.mode == EmulationMode::CGB) {
                     uint8_t cgbPaletteNum = sprite.flags & 0x07;
                     ImGui::Text("Palette: OBP%d", cgbPaletteNum);
@@ -493,28 +489,22 @@ void VRAMViewerPanel::RenderSpriteView() {
                     ImGui::Text("Palette: OBP%d", sprite.paletteNumber);
                 }
                 
-                // Display flip flags (Requirement 9.3)
                 ImGui::Text("Flip: %s%s", 
                     sprite.xFlip ? "H" : "-",
                     sprite.yFlip ? "V" : "-");
-                
-                // Display priority
                 ImGui::Text("Priority: %s", sprite.priority ? "Behind BG" : "Above BG");
                 
-                // Display visibility status
                 bool visible = spriteParser.IsSpriteVisible(sprite);
                 ImGui::Text("Visible: %s", visible ? "Yes" : "No");
                 
                 ImGui::EndTooltip();
             }
             
-            // Display sprite index below the tile
             ImGui::Text("%02zu", i);
             
             ImGui::PopID();
             ImGui::EndGroup();
             
-            // Count visible sprites
             if (spriteParser.IsSpriteVisible(sprite)) {
                 visibleCount++;
             }
@@ -522,7 +512,6 @@ void VRAMViewerPanel::RenderSpriteView() {
         
         ImGui::EndChild();
         
-        // Display visible sprite count
         ImGui::Text("Visible on screen: %d / 40", visibleCount);
     }
 }
@@ -555,6 +544,9 @@ void VRAMViewerPanel::RenderTileInspector() {
         const int inspectorScale = 8;
         const int inspectorTileSize = 8 * inspectorScale;  // 64 pixels
         
+        // Ensure inspector pool is initialized
+        renderer_->InitializeInspectorPool(inspectorScale);
+        
         // Get the appropriate VRAM buffer
         const uint8_t* vramBuffer = (state_.currentBank == 0) ? vramBank0_.data() : vramBank1_.data();
         
@@ -564,8 +556,8 @@ void VRAMViewerPanel::RenderTileInspector() {
         // Get the palette for rendering
         Palette palette = paletteManager_->GetBGPalette(state_.selectedPalette);
         
-        // Render tile at larger scale
-        unsigned int texture = renderer_->RenderTile(pixelData, palette, inspectorScale);
+        // Render tile using pool-based method (no memory leak)
+        unsigned int texture = renderer_->RenderInspectorTile(pixelData, palette);
         
         // Display the enlarged tile
         ImGui::Text("Preview (8x scale):");
@@ -577,28 +569,23 @@ void VRAMViewerPanel::RenderTileInspector() {
         ImGui::Text("Raw Tile Data (16 bytes):");
         
         // Calculate the offset within the VRAM buffer
-        // The tile address is 0x8000 + (tileIndex * 16), but our buffer starts at 0x8000
-        // So the offset is just tileIndex * 16
         size_t tileOffset = static_cast<size_t>(tileIndex) * 16;
         
         // Ensure we don't read past the buffer
         if (tileOffset + 16 <= VRAM_BANK_SIZE) {
             const uint8_t* tileData = vramBuffer + tileOffset;
             
-            // Display bytes in two rows of 8 bytes each for readability
-            // Row format: "Row N: XX XX XX XX XX XX XX XX  (LSB MSB pairs)"
             ImGui::BeginChild("TileBytes", ImVec2(0, 80), true);
             
             // Display as 8 rows (one per tile row), showing LSB and MSB bytes
             for (int row = 0; row < 8; row++) {
-                uint8_t lsb = tileData[row * 2];      // Low byte
-                uint8_t msb = tileData[row * 2 + 1];  // High byte
+                uint8_t lsb = tileData[row * 2];
+                uint8_t msb = tileData[row * 2 + 1];
                 ImGui::Text("Row %d: %02X %02X", row, lsb, msb);
                 
-                // Show on same line for compact display
                 if (row < 7) {
                     if ((row % 2) == 0) {
-                        ImGui::SameLine(150);  // Align second column
+                        ImGui::SameLine(150);
                     }
                 }
             }

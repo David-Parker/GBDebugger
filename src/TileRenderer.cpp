@@ -10,15 +10,202 @@
 
 namespace GBDebug {
 
+// ============================================================================
+// TexturePool Implementation
+// ============================================================================
+
+TexturePool::TexturePool()
+    : rows_(0), cols_(0), scale_(1), initialized_(false)
+{
+}
+
+TexturePool::~TexturePool() {
+    Clear();
+}
+
+void TexturePool::Initialize(int rows, int cols, int scale) {
+    // Clear any existing textures first
+    Clear();
+    
+    rows_ = rows;
+    cols_ = cols;
+    scale_ = scale;
+    
+    int totalTextures = rows * cols;
+    textures_.resize(totalTextures);
+    
+    int textureSize = 8 * scale;
+    
+    // Create all textures upfront
+    for (int i = 0; i < totalTextures; i++) {
+        GLuint textureId = 0;
+        glGenTextures(1, &textureId);
+        glBindTexture(GL_TEXTURE_2D, textureId);
+        
+        // Set texture parameters for pixel-perfect rendering
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        
+        // Allocate texture storage (empty initially)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, textureSize, textureSize, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        
+        textures_[i] = static_cast<unsigned int>(textureId);
+    }
+    
+    glBindTexture(GL_TEXTURE_2D, 0);
+    initialized_ = true;
+}
+
+int TexturePool::GetIndex(int row, int col) const {
+    if (row < 0 || row >= rows_ || col < 0 || col >= cols_) {
+        return -1;
+    }
+    return row * cols_ + col;
+}
+
+unsigned int TexturePool::GetTexture(int row, int col) const {
+    int index = GetIndex(row, col);
+    if (index < 0 || index >= static_cast<int>(textures_.size())) {
+        return 0;
+    }
+    return textures_[index];
+}
+
+void TexturePool::UpdateTexture(int row, int col, const uint8_t* rgbaData) {
+    int index = GetIndex(row, col);
+    if (index < 0 || index >= static_cast<int>(textures_.size()) || rgbaData == nullptr) {
+        return;
+    }
+    
+    unsigned int textureId = textures_[index];
+    if (textureId == 0) {
+        return;
+    }
+    
+    int textureSize = 8 * scale_;
+    
+    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(textureId));
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, textureSize, textureSize,
+                    GL_RGBA, GL_UNSIGNED_BYTE, rgbaData);
+    glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void TexturePool::Clear() {
+    for (unsigned int textureId : textures_) {
+        if (textureId != 0) {
+            GLuint glId = static_cast<GLuint>(textureId);
+            glDeleteTextures(1, &glId);
+        }
+    }
+    textures_.clear();
+    rows_ = 0;
+    cols_ = 0;
+    initialized_ = false;
+}
+
+bool TexturePool::ReinitializeIfNeeded(int rows, int cols, int scale) {
+    if (initialized_ && rows_ == rows && cols_ == cols && scale_ == scale) {
+        return false;  // No change needed
+    }
+    Initialize(rows, cols, scale);
+    return true;
+}
+
+// ============================================================================
+// TileRenderer Implementation
+// ============================================================================
+
 TileRenderer::TileRenderer()
-    : currentScale_(4)
+    : currentScale_(2)
 {
     // Pre-allocate texture buffer for common case (32x32 RGBA = 4096 bytes)
-    textureBuffer_.reserve(32 * 32 * 4);
+    textureBuffer_.reserve(64 * 64 * 4);
 }
 
 TileRenderer::~TileRenderer() {
     ClearTextures();
+}
+
+void TileRenderer::InitializeTileGridPool(int rows, int cols, int scale) {
+    tileGridPool_.ReinitializeIfNeeded(rows, cols, scale);
+    currentScale_ = scale;
+}
+
+void TileRenderer::InitializeSpritePool(int maxSprites, int scale) {
+    // Each sprite needs 2 textures for 8x16 mode (top and bottom halves)
+    spritePool_.ReinitializeIfNeeded(maxSprites, 2, scale);
+}
+
+void TileRenderer::InitializeInspectorPool(int scale) {
+    // Single texture for inspector view
+    inspectorPool_.ReinitializeIfNeeded(1, 1, scale);
+}
+
+unsigned int TileRenderer::RenderTileAt(
+    int row, int col,
+    const std::array<std::array<uint8_t, 8>, 8>& pixelData,
+    const Palette& palette
+) {
+    if (!tileGridPool_.IsInitialized()) {
+        return 0;
+    }
+    
+    int scale = tileGridPool_.GetScale();
+    
+    // Convert pixel data to RGBA
+    std::vector<uint8_t> rgbaData = ConvertToRGBA(pixelData, palette, scale);
+    
+    // Update the texture at this grid position
+    tileGridPool_.UpdateTexture(row, col, rgbaData.data());
+    
+    // Return the texture ID for ImGui::Image()
+    return tileGridPool_.GetTexture(row, col);
+}
+
+unsigned int TileRenderer::RenderSpriteAt(
+    int spriteIndex,
+    const std::array<std::array<uint8_t, 8>, 8>& pixelData,
+    const Palette& palette,
+    bool isBottomHalf
+) {
+    if (!spritePool_.IsInitialized()) {
+        return 0;
+    }
+    
+    int scale = spritePool_.GetScale();
+    int col = isBottomHalf ? 1 : 0;  // Column 0 = top/single, Column 1 = bottom
+    
+    // Convert pixel data to RGBA
+    std::vector<uint8_t> rgbaData = ConvertToRGBA(pixelData, palette, scale);
+    
+    // Update the texture at this sprite position
+    spritePool_.UpdateTexture(spriteIndex, col, rgbaData.data());
+    
+    // Return the texture ID for ImGui::Image()
+    return spritePool_.GetTexture(spriteIndex, col);
+}
+
+unsigned int TileRenderer::RenderInspectorTile(
+    const std::array<std::array<uint8_t, 8>, 8>& pixelData,
+    const Palette& palette
+) {
+    if (!inspectorPool_.IsInitialized()) {
+        return 0;
+    }
+    
+    int scale = inspectorPool_.GetScale();
+    
+    // Convert pixel data to RGBA
+    std::vector<uint8_t> rgbaData = ConvertToRGBA(pixelData, palette, scale);
+    
+    // Update the single inspector texture
+    inspectorPool_.UpdateTexture(0, 0, rgbaData.data());
+    
+    // Return the texture ID for ImGui::Image()
+    return inspectorPool_.GetTexture(0, 0);
 }
 
 unsigned int TileRenderer::CreateTexture(int width, int height) {
@@ -29,11 +216,8 @@ unsigned int TileRenderer::CreateTexture(int width, int height) {
     glBindTexture(GL_TEXTURE_2D, textureId);
     
     // Set texture parameters for pixel-perfect rendering
-    // Use nearest-neighbor filtering to preserve sharp pixel edges
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    
-    // Clamp to edge to avoid texture bleeding
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     
@@ -41,7 +225,6 @@ unsigned int TileRenderer::CreateTexture(int width, int height) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, 
                  GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     
-    // Unbind texture
     glBindTexture(GL_TEXTURE_2D, 0);
     
     return static_cast<unsigned int>(textureId);
@@ -53,11 +236,8 @@ void TileRenderer::UpdateTexture(unsigned int texture, const uint8_t* data, int 
     }
     
     glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(texture));
-    
-    // Upload pixel data to texture
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height,
                     GL_RGBA, GL_UNSIGNED_BYTE, data);
-    
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
@@ -115,7 +295,7 @@ unsigned int TileRenderer::RenderTile(
     // Convert pixel data to RGBA
     std::vector<uint8_t> rgbaData = ConvertToRGBA(pixelData, palette, scale);
     
-    // Create a new texture for this render
+    // Create a new texture for this render (LEGACY behavior - causes memory leak if called repeatedly)
     unsigned int texture = CreateTexture(textureSize, textureSize);
     
     if (texture != 0) {
@@ -177,7 +357,6 @@ void TileRenderer::MarkAllDirty() {
     for (auto& pair : dirtyFlags_) {
         pair.second = true;
     }
-    // Also mark any tiles that have textures but no dirty flag entry
     for (const auto& pair : tileTextures_) {
         dirtyFlags_[pair.first] = true;
     }
@@ -188,12 +367,16 @@ bool TileRenderer::IsTileDirty(int tileIndex) const {
     if (it != dirtyFlags_.end()) {
         return it->second;
     }
-    // If no entry exists, consider it dirty (needs initial render)
     return true;
 }
 
 void TileRenderer::ClearTextures() {
-    // Delete all OpenGL textures
+    // Clear texture pools
+    tileGridPool_.Clear();
+    spritePool_.Clear();
+    inspectorPool_.Clear();
+    
+    // Delete legacy cached textures
     for (const auto& pair : tileTextures_) {
         GLuint textureId = static_cast<GLuint>(pair.second);
         if (textureId != 0) {
@@ -201,13 +384,15 @@ void TileRenderer::ClearTextures() {
         }
     }
     
-    // Clear the maps
     tileTextures_.clear();
     dirtyFlags_.clear();
 }
 
 size_t TileRenderer::GetCacheSize() const {
-    return tileTextures_.size();
+    return tileTextures_.size() + 
+           (tileGridPool_.IsInitialized() ? tileGridPool_.GetRows() * tileGridPool_.GetCols() : 0) +
+           (spritePool_.IsInitialized() ? spritePool_.GetRows() * spritePool_.GetCols() : 0) +
+           (inspectorPool_.IsInitialized() ? 1 : 0);
 }
 
 } // namespace GBDebug
