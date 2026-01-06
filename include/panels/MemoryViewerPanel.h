@@ -39,6 +39,7 @@ public:
 
 private:
     void RenderMemoryRegion(const MemoryRegion& region);
+    void RenderIORegisters();
     
     MemoryState state_;
     bool visible_;

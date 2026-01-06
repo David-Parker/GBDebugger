@@ -110,6 +110,102 @@ static const MemoryRegion MEMORY_REGIONS[] = {
 
 static const size_t MEMORY_REGIONS_COUNT = sizeof(MEMORY_REGIONS) / sizeof(MEMORY_REGIONS[0]);
 
+/**
+ * IORegister - Defines a single I/O register or register range
+ * 
+ * Used by the memory viewer to display semantic names for I/O registers
+ * in the $FF00-$FF7F range. Based on Pan Docs I/O ranges documentation.
+ */
+struct IORegister {
+    const char* name;
+    uint16_t start;
+    uint16_t end;
+    const char* description;
+};
+
+/**
+ * GameBoy I/O register ranges (based on Pan Docs)
+ * https://gbdev.io/pandocs/Memory_Map.html#io-ranges
+ */
+static const IORegister IO_REGISTERS[] = {
+    {"P1/JOYP",     0xFF00, 0xFF00, "Joypad input"},
+    {"SB",          0xFF01, 0xFF01, "Serial transfer data"},
+    {"SC",          0xFF02, 0xFF02, "Serial transfer control"},
+    {"DIV",         0xFF04, 0xFF04, "Divider register"},
+    {"TIMA",        0xFF05, 0xFF05, "Timer counter"},
+    {"TMA",         0xFF06, 0xFF06, "Timer modulo"},
+    {"TAC",         0xFF07, 0xFF07, "Timer control"},
+    {"IF",          0xFF0F, 0xFF0F, "Interrupt flag"},
+    {"NR10",        0xFF10, 0xFF10, "Sound channel 1 sweep"},
+    {"NR11",        0xFF11, 0xFF11, "Sound channel 1 length/duty"},
+    {"NR12",        0xFF12, 0xFF12, "Sound channel 1 envelope"},
+    {"NR13",        0xFF13, 0xFF13, "Sound channel 1 freq lo"},
+    {"NR14",        0xFF14, 0xFF14, "Sound channel 1 freq hi"},
+    {"NR21",        0xFF16, 0xFF16, "Sound channel 2 length/duty"},
+    {"NR22",        0xFF17, 0xFF17, "Sound channel 2 envelope"},
+    {"NR23",        0xFF18, 0xFF18, "Sound channel 2 freq lo"},
+    {"NR24",        0xFF19, 0xFF19, "Sound channel 2 freq hi"},
+    {"NR30",        0xFF1A, 0xFF1A, "Sound channel 3 on/off"},
+    {"NR31",        0xFF1B, 0xFF1B, "Sound channel 3 length"},
+    {"NR32",        0xFF1C, 0xFF1C, "Sound channel 3 output level"},
+    {"NR33",        0xFF1D, 0xFF1D, "Sound channel 3 freq lo"},
+    {"NR34",        0xFF1E, 0xFF1E, "Sound channel 3 freq hi"},
+    {"NR41",        0xFF20, 0xFF20, "Sound channel 4 length"},
+    {"NR42",        0xFF21, 0xFF21, "Sound channel 4 envelope"},
+    {"NR43",        0xFF22, 0xFF22, "Sound channel 4 polynomial"},
+    {"NR44",        0xFF23, 0xFF23, "Sound channel 4 control"},
+    {"NR50",        0xFF24, 0xFF24, "Master volume"},
+    {"NR51",        0xFF25, 0xFF25, "Sound panning"},
+    {"NR52",        0xFF26, 0xFF26, "Sound on/off"},
+    {"Wave RAM",    0xFF30, 0xFF3F, "Wave pattern RAM"},
+    {"LCDC",        0xFF40, 0xFF40, "LCD control"},
+    {"STAT",        0xFF41, 0xFF41, "LCD status"},
+    {"SCY",         0xFF42, 0xFF42, "Scroll Y"},
+    {"SCX",         0xFF43, 0xFF43, "Scroll X"},
+    {"LY",          0xFF44, 0xFF44, "LCD Y coordinate"},
+    {"LYC",         0xFF45, 0xFF45, "LY compare"},
+    {"DMA",         0xFF46, 0xFF46, "OAM DMA transfer"},
+    {"BGP",         0xFF47, 0xFF47, "BG palette data"},
+    {"OBP0",        0xFF48, 0xFF48, "OBJ palette 0"},
+    {"OBP1",        0xFF49, 0xFF49, "OBJ palette 1"},
+    {"WY",          0xFF4A, 0xFF4A, "Window Y position"},
+    {"WX",          0xFF4B, 0xFF4B, "Window X position"},
+    {"KEY0",        0xFF4C, 0xFF4C, "CGB: Speed switch prep"},
+    {"KEY1",        0xFF4D, 0xFF4D, "CGB: Speed switch"},
+    {"VBK",         0xFF4F, 0xFF4F, "CGB: VRAM bank select"},
+    {"BOOT",        0xFF50, 0xFF50, "Boot ROM disable"},
+    {"HDMA1",       0xFF51, 0xFF51, "CGB: HDMA source hi"},
+    {"HDMA2",       0xFF52, 0xFF52, "CGB: HDMA source lo"},
+    {"HDMA3",       0xFF53, 0xFF53, "CGB: HDMA dest hi"},
+    {"HDMA4",       0xFF54, 0xFF54, "CGB: HDMA dest lo"},
+    {"HDMA5",       0xFF55, 0xFF55, "CGB: HDMA control"},
+    {"RP",          0xFF56, 0xFF56, "CGB: IR port"},
+    {"BCPS/BGPI",   0xFF68, 0xFF68, "CGB: BG palette index"},
+    {"BCPD/BGPD",   0xFF69, 0xFF69, "CGB: BG palette data"},
+    {"OCPS/OBPI",   0xFF6A, 0xFF6A, "CGB: OBJ palette index"},
+    {"OCPD/OBPD",   0xFF6B, 0xFF6B, "CGB: OBJ palette data"},
+    {"OPRI",        0xFF6C, 0xFF6C, "CGB: Object priority mode"},
+    {"SVBK",        0xFF70, 0xFF70, "CGB: WRAM bank select"},
+    {"PCM12",       0xFF76, 0xFF76, "CGB: Audio digital out 1&2"},
+    {"PCM34",       0xFF77, 0xFF77, "CGB: Audio digital out 3&4"},
+};
+
+static const size_t IO_REGISTERS_COUNT = sizeof(IO_REGISTERS) / sizeof(IO_REGISTERS[0]);
+
+/**
+ * Helper function to find I/O register info for a given address
+ * @param address Address in the I/O range ($FF00-$FF7F)
+ * @return Pointer to IORegister if found, nullptr otherwise
+ */
+inline const IORegister* FindIORegister(uint16_t address) {
+    for (size_t i = 0; i < IO_REGISTERS_COUNT; i++) {
+        if (address >= IO_REGISTERS[i].start && address <= IO_REGISTERS[i].end) {
+            return &IO_REGISTERS[i];
+        }
+    }
+    return nullptr;
+}
+
 } // namespace GBDebug
 
 #endif // DEBUGGER_TYPES_H
