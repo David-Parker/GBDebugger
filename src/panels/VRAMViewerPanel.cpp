@@ -620,11 +620,20 @@ void VRAMViewerPanel::RenderTileInspector() {
         // Ensure inspector pool is initialized
         renderer_->InitializeInspectorPool(inspectorScale);
         
-        // Get the appropriate VRAM buffer
-        const uint8_t* vramBuffer = (state_.currentBank == 0) ? vramBank0_.data() : vramBank1_.data();
+        // Get the appropriate VRAM buffer based on current source selection
+        // This ensures the inspector shows data from the same source as the tile grid
+        const uint8_t* vramBuffer = GetVRAMData();
+        
+        // Determine the bank number for decoding based on vramSource_
+        uint8_t bankForDecoding = 0;
+        if (vramSource_ == VRAMSource::Bank1) {
+            bankForDecoding = 1;
+        } else if (vramSource_ == VRAMSource::MappedMemory) {
+            bankForDecoding = state_.currentBank;
+        }
         
         // Decode the tile
-        auto pixelData = decoder_->DecodeTile(vramBuffer, static_cast<uint16_t>(tileIndex), state_.currentBank);
+        auto pixelData = decoder_->DecodeTile(vramBuffer, static_cast<uint16_t>(tileIndex), bankForDecoding);
         
         // Get the palette for rendering
         Palette palette = paletteManager_->GetBGPalette(state_.selectedPalette);
