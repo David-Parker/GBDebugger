@@ -6,7 +6,101 @@
 namespace GBDebug {
 
 MemoryViewerPanel::MemoryViewerPanel()
-    : visible_(true) {
+    : visible_(true), bankData_(nullptr) {
+}
+
+void MemoryViewerPanel::SetBankData(const BankData* bankData) {
+    bankData_ = bankData;
+}
+
+uint8_t MemoryViewerPanel::GetDataSource(uint16_t address, const RegionBankState& state) const {
+    // If using mapped memory or no bank data available, use the memory buffer
+    if (state.source == BankSource::MappedMemory || bankData_ == nullptr) {
+        return state_.Read(address);
+    }
+    
+    // Determine which region this address belongs to and get data from specific bank
+    
+    // VRAM region: 0x8000-0x9FFF
+    if (address >= 0x8000 && address <= 0x9FFF) {
+        if (bankData_->vramBanksProvided && 
+            state.bankNumber < 2 && 
+            bankData_->vramBanks[state.bankNumber] != nullptr) {
+            uint16_t offset = address - 0x8000;
+            return bankData_->vramBanks[state.bankNumber][offset];
+        }
+    }
+    // ROM Bank N region: 0x4000-0x7FFF
+    else if (address >= 0x4000 && address <= 0x7FFF) {
+        if (bankData_->romBanksProvided && 
+            state.bankNumber < bankData_->romBankCount && 
+            bankData_->romBanks[state.bankNumber] != nullptr) {
+            uint16_t offset = address - 0x4000;
+            return bankData_->romBanks[state.bankNumber][offset];
+        }
+    }
+    // External RAM region: 0xA000-0xBFFF
+    else if (address >= 0xA000 && address <= 0xBFFF) {
+        if (bankData_->ramBanksProvided && 
+            state.bankNumber < bankData_->ramBankCount && 
+            bankData_->ramBanks[state.bankNumber] != nullptr) {
+            uint16_t offset = address - 0xA000;
+            // Make sure we don't read past the bank size
+            if (offset < bankData_->ramBankSize) {
+                return bankData_->ramBanks[state.bankNumber][offset];
+            }
+        }
+    }
+    
+    // Fallback to mapped memory if bank data not available
+    return state_.Read(address);
+}
+
+void MemoryViewerPanel::RenderBankSelector(const char* label, RegionBankState& state, uint16_t maxBank) {
+    // Build the preview string for the combo box
+    char preview[32];
+    if (state.source == BankSource::MappedMemory) {
+        snprintf(preview, sizeof(preview), "Mapped Memory");
+    } else {
+        snprintf(preview, sizeof(preview), "Bank %d (0x%X)", state.bankNumber, state.bankNumber);
+    }
+    
+    // Create a unique ID for this combo box
+    char comboId[64];
+    snprintf(comboId, sizeof(comboId), "##%s_bank_selector", label);
+    
+    ImGui::Text("%s:", label);
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(150.0f);
+    
+    if (ImGui::BeginCombo(comboId, preview)) {
+        // "Mapped Memory" option
+        bool isSelected = (state.source == BankSource::MappedMemory);
+        if (ImGui::Selectable("Mapped Memory", isSelected)) {
+            state.source = BankSource::MappedMemory;
+            state.bankNumber = 0;
+        }
+        if (isSelected) {
+            ImGui::SetItemDefaultFocus();
+        }
+        
+        // Individual bank options
+        for (uint16_t bank = 0; bank < maxBank; bank++) {
+            char bankLabel[32];
+            snprintf(bankLabel, sizeof(bankLabel), "Bank %d (0x%X)", bank, bank);
+            
+            isSelected = (state.source == BankSource::SpecificBank && state.bankNumber == bank);
+            if (ImGui::Selectable(bankLabel, isSelected)) {
+                state.source = BankSource::SpecificBank;
+                state.bankNumber = bank;
+            }
+            if (isSelected) {
+                ImGui::SetItemDefaultFocus();
+            }
+        }
+        
+        ImGui::EndCombo();
+    }
 }
 
 bool MemoryViewerPanel::Update(const uint8_t* buffer, size_t size) {
@@ -26,6 +120,34 @@ void MemoryViewerPanel::RenderMemoryRegion(const MemoryRegion& region) {
         return;
     }
     
+    // Determine which bank state to use and show bank selector if applicable
+    RegionBankState* currentBankState = nullptr;
+    
+    // VRAM region: 0x8000-0x9FFF
+    if (region.start == 0x8000 && region.end == 0x9FFF) {
+        if (bankData_ != nullptr && bankData_->vramBanksProvided) {
+            RenderBankSelector("VRAM Bank", vramBankState_, 2);
+            ImGui::Separator();
+        }
+        currentBankState = &vramBankState_;
+    }
+    // ROM Bank N region: 0x4000-0x7FFF
+    else if (region.start == 0x4000 && region.end == 0x7FFF) {
+        if (bankData_ != nullptr && bankData_->romBanksProvided && bankData_->romBankCount > 0) {
+            RenderBankSelector("ROM Bank", romBankState_, bankData_->romBankCount);
+            ImGui::Separator();
+        }
+        currentBankState = &romBankState_;
+    }
+    // External RAM region: 0xA000-0xBFFF
+    else if (region.start == 0xA000 && region.end == 0xBFFF) {
+        if (bankData_ != nullptr && bankData_->ramBanksProvided && bankData_->ramBankCount > 0) {
+            RenderBankSelector("RAM Bank", ramBankState_, bankData_->ramBankCount);
+            ImGui::Separator();
+        }
+        currentBankState = &ramBankState_;
+    }
+    
     // Iterate through memory region, 16 bytes per row
     for (uint32_t addr = region.start; addr <= region.end; addr += 16) {
         // Calculate end of this row (don't go past region end)
@@ -43,7 +165,14 @@ void MemoryViewerPanel::RenderMemoryRegion(const MemoryRegion& region) {
         for (int i = 0; i < 16; i++) {
             if (i < bytes_in_row) {
                 uint16_t byte_addr = addr + i;
-                uint8_t byte = state_.Read(byte_addr);
+                uint8_t byte;
+                
+                // Use GetDataSource if we have a bank state for this region
+                if (currentBankState != nullptr) {
+                    byte = GetDataSource(byte_addr, *currentBankState);
+                } else {
+                    byte = state_.Read(byte_addr);
+                }
                 
                 snprintf(hex_line + (i * 3), 4, "%02X ", byte);
                 ascii_line[i] = (byte >= 32 && byte <= 126) ? byte : '.';

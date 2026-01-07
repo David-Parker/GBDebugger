@@ -24,7 +24,10 @@ VRAMViewerPanel::VRAMViewerPanel()
     : decoder_(new TileDecoder()),
       renderer_(new TileRenderer()),
       paletteManager_(new PaletteManager()),
-      visible_(true) {
+      visible_(true),
+      vramBank0External_(nullptr),
+      vramBank1External_(nullptr),
+      vramSource_(VRAMSource::MappedMemory) {
     // Initialize VRAM buffers to zero
     vramBank0_.fill(0);
     vramBank1_.fill(0);
@@ -194,6 +197,117 @@ void VRAMViewerPanel::SetEmulationMode(EmulationMode mode) {
     }
 }
 
+void VRAMViewerPanel::SetVRAMBankData(const uint8_t* bank0, const uint8_t* bank1) {
+    // Store pointers to external bank data (Requirements 1.3, 1.6)
+    // We do not take ownership - caller retains ownership of the memory
+    vramBank0External_ = bank0;
+    vramBank1External_ = bank1;
+    
+    // If external bank data is cleared, revert to mapped memory
+    if (bank0 == nullptr && bank1 == nullptr) {
+        vramSource_ = VRAMSource::MappedMemory;
+    }
+    
+    // Mark display as needing refresh
+    state_.needsRefresh = true;
+}
+
+const uint8_t* VRAMViewerPanel::GetVRAMData() const {
+    // Return appropriate data based on vramSource_ selection (Requirements 2.3, 2.4, 2.5)
+    switch (vramSource_) {
+        case VRAMSource::Bank0:
+            // Return external bank 0 if available, otherwise fall back to mapped memory
+            if (vramBank0External_ != nullptr) {
+                return vramBank0External_;
+            }
+            // Fall back to internal buffer (mapped memory)
+            return vramBank0_.data();
+            
+        case VRAMSource::Bank1:
+            // Return external bank 1 if available, otherwise fall back to mapped memory
+            if (vramBank1External_ != nullptr) {
+                return vramBank1External_;
+            }
+            // Fall back to internal buffer (mapped memory)
+            return vramBank0_.data();
+            
+        case VRAMSource::MappedMemory:
+        default:
+            // Return internal buffer (currently mapped VRAM)
+            return vramBank0_.data();
+    }
+}
+
+void VRAMViewerPanel::RenderVRAMBankSelector() {
+    // Check if external bank data is provided (Requirement 2.6)
+    // If not provided, don't show selector (backward compatibility)
+    bool hasExternalBankData = (vramBank0External_ != nullptr || vramBank1External_ != nullptr);
+    
+    if (!hasExternalBankData) {
+        // No external bank data provided - don't show selector
+        return;
+    }
+    
+    // Render bank selection dropdown (Requirements 2.1, 2.2)
+    ImGui::Text("VRAM Source:");
+    ImGui::SameLine();
+    
+    // Define the options
+    const char* sourceOptions[] = { "Mapped Memory", "Bank 0", "Bank 1" };
+    int currentSource = static_cast<int>(vramSource_);
+    
+    // Create combo box for bank selection
+    ImGui::SetNextItemWidth(150);
+    if (ImGui::Combo("##VRAMSource", &currentSource, sourceOptions, IM_ARRAYSIZE(sourceOptions))) {
+        // Update vramSource_ based on selection
+        VRAMSource newSource = static_cast<VRAMSource>(currentSource);
+        
+        // Validate selection - Bank 1 only available if external data provided
+        if (newSource == VRAMSource::Bank1 && vramBank1External_ == nullptr) {
+            // Bank 1 not available, keep current selection
+            // Could show a tooltip or warning here
+        } else {
+            vramSource_ = newSource;
+            
+            // Mark display as needing refresh
+            state_.needsRefresh = true;
+            
+            // Mark all tiles as dirty since data source changed
+            if (renderer_) {
+                renderer_->MarkAllDirty();
+            }
+        }
+    }
+    
+    // Show tooltip with current source info
+    if (ImGui::IsItemHovered()) {
+        ImGui::BeginTooltip();
+        switch (vramSource_) {
+            case VRAMSource::MappedMemory:
+                ImGui::Text("Viewing currently mapped VRAM");
+                break;
+            case VRAMSource::Bank0:
+                ImGui::Text("Viewing VRAM Bank 0 directly");
+                break;
+            case VRAMSource::Bank1:
+                ImGui::Text("Viewing VRAM Bank 1 directly");
+                break;
+        }
+        ImGui::EndTooltip();
+    }
+    
+    // Show indicator if Bank 1 is not available
+    if (vramBank1External_ == nullptr) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("(Bank 1 N/A)");
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::Text("Bank 1 not available (DMG mode or not provided)");
+            ImGui::EndTooltip();
+        }
+    }
+}
+
 void VRAMViewerPanel::Render() {
     if (!visible_) {
         return;
@@ -204,6 +318,9 @@ void VRAMViewerPanel::Render() {
     ImGui::SetNextWindowSize(ImVec2(580, 450), ImGuiCond_FirstUseEver);
     
     ImGui::Begin(GetName());
+    
+    // Render bank selector at top of panel (Requirement 2.1)
+    RenderVRAMBankSelector();
     
     // Render the tile grid (main content)
     RenderTileGrid();
@@ -227,8 +344,8 @@ void VRAMViewerPanel::RenderTileGrid() {
     // VRAM contains 384 tiles (8KB / 16 bytes per tile)
     int tileCount = 384;
     
-    // Always use bank 0 (the currently mapped VRAM from memory buffer)
-    const uint8_t* vramBuffer = vramBank0_.data();
+    // Get VRAM data based on current source selection (Requirements 2.3, 2.4, 2.5)
+    const uint8_t* vramBuffer = GetVRAMData();
     
     // Get the palette for rendering (use palette 0 for tile grid display)
     Palette palette = paletteManager_->GetBGPalette(0);

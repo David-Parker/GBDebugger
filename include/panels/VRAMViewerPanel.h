@@ -100,6 +100,20 @@ struct SpriteAttributes {
 };
 
 /**
+ * VRAMSource - Specifies the source of VRAM data for viewing
+ * 
+ * Determines which VRAM data source is used for tile rendering:
+ * - MappedMemory: Use the currently mapped VRAM (existing behavior)
+ * - Bank0: Use external VRAM bank 0 data provided via SetVRAMBankData()
+ * - Bank1: Use external VRAM bank 1 data provided via SetVRAMBankData()
+ */
+enum class VRAMSource {
+    MappedMemory,  // Currently mapped VRAM (default, backward compatible)
+    Bank0,         // External VRAM bank 0
+    Bank1          // External VRAM bank 1
+};
+
+/**
  * VRAMViewerState - Current state of the VRAM viewer panel
  * 
  * Tracks the panel's UI state including mode, selected tile, bank selection,
@@ -195,12 +209,38 @@ public:
      * @param mode EmulationMode::DMG or EmulationMode::CGB
      */
     void SetEmulationMode(EmulationMode mode);
+    
+    /**
+     * Set external VRAM bank data for viewing
+     * 
+     * Provides pointers to external VRAM bank data that can be selected
+     * for viewing instead of the currently mapped memory. The panel does
+     * not take ownership of the provided memory - caller retains ownership.
+     * 
+     * @param bank0 Pointer to 8192-byte VRAM bank 0 (or nullptr to clear)
+     * @param bank1 Pointer to 8192-byte VRAM bank 1 (or nullptr to clear)
+     */
+    void SetVRAMBankData(const uint8_t* bank0, const uint8_t* bank1);
 
 private:
     // Rendering methods
     void RenderTileGrid();
     void RenderSpriteView();
     void RenderTileInspector();
+    void RenderVRAMBankSelector();
+    
+    // Helper methods
+    /**
+     * Get the VRAM data buffer based on current source selection
+     * 
+     * Returns the appropriate VRAM data based on vramSource_:
+     * - MappedMemory: Returns internal vramBank0_ buffer
+     * - Bank0: Returns vramBank0External_ (falls back to vramBank0_ if nullptr)
+     * - Bank1: Returns vramBank1External_ (falls back to vramBank0_ if nullptr)
+     * 
+     * @return Pointer to 8192-byte VRAM buffer
+     */
+    const uint8_t* GetVRAMData() const;
     
     // Helper components
     std::unique_ptr<TileDecoder> decoder_;
@@ -221,6 +261,14 @@ private:
     // Panel state
     VRAMViewerState state_;
     bool visible_;
+    
+    // External VRAM bank data (non-owning pointers)
+    // These point to external bank data provided via SetVRAMBankData()
+    const uint8_t* vramBank0External_;  // External VRAM bank 0 (8KB)
+    const uint8_t* vramBank1External_;  // External VRAM bank 1 (8KB)
+    
+    // Current VRAM data source selection
+    VRAMSource vramSource_;
 };
 
 } // namespace GBDebug

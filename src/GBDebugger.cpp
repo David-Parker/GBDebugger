@@ -16,6 +16,7 @@ GBDebugger::GBDebugger()
     , memory_panel_(new MemoryViewerPanel())
     , control_panel_(new ControlPanel())
     , vram_panel_(new VRAMViewerPanel())
+    , bankData_(new BankData())
     , is_open_(false) {
 }
 
@@ -153,6 +154,112 @@ bool GBDebugger::UpdateColorRAM(const uint8_t* bgPaletteRAM, const uint8_t* objP
     }
     
     return vram_panel_->UpdatePalettes(bgPalettes, objPalettes);
+}
+
+bool GBDebugger::SetVRAMBank(uint8_t bank, const uint8_t* data) {
+    // Validate bank number is 0 or 1
+    if (bank > 1) {
+        return false;
+    }
+    
+    // Store pointer in BankData structure
+    bankData_->vramBanks[bank] = data;
+    
+    // Set vramBanksProvided flag to true if at least one bank is provided
+    if (data != nullptr) {
+        bankData_->vramBanksProvided = true;
+    }
+    
+    // Forward VRAM bank data to VRAMViewerPanel (Requirements 1.1, 1.2)
+    // Pass both bank pointers so the panel can offer bank selection
+    vram_panel_->SetVRAMBankData(bankData_->vramBanks[0], bankData_->vramBanks[1]);
+    
+    // Also update MemoryViewerPanel with bank data for VRAM region viewing
+    memory_panel_->SetBankData(bankData_.get());
+    
+    return true;
+}
+
+bool GBDebugger::SetROMBanks(uint16_t count, std::function<const uint8_t*(uint16_t)> getBankFunc) {
+    // Validate bank count is 1-512
+    if (count < 1 || count > 512) {
+        return false;
+    }
+    
+    // Call function for each bank and store pointers
+    for (uint16_t i = 0; i < count; i++) {
+        bankData_->romBanks[i] = getBankFunc(i);
+    }
+    
+    // Clear any remaining bank pointers
+    for (uint16_t i = count; i < 512; i++) {
+        bankData_->romBanks[i] = nullptr;
+    }
+    
+    bankData_->romBankCount = count;
+    bankData_->romBanksProvided = true;
+    
+    // Forward bank data to MemoryViewerPanel for ROM region viewing (Requirement 5.1)
+    memory_panel_->SetBankData(bankData_.get());
+    
+    return true;
+}
+
+bool GBDebugger::SetRAMBanks(uint8_t count, size_t bankSize, 
+                             std::function<const uint8_t*(uint8_t)> getBankFunc) {
+    // Validate bank count is 0-16
+    if (count > 16) {
+        return false;
+    }
+    
+    // Call function for each bank and store pointers
+    for (uint8_t i = 0; i < count; i++) {
+        bankData_->ramBanks[i] = getBankFunc(i);
+    }
+    
+    // Clear any remaining bank pointers
+    for (uint8_t i = count; i < 16; i++) {
+        bankData_->ramBanks[i] = nullptr;
+    }
+    
+    bankData_->ramBankCount = count;
+    bankData_->ramBankSize = bankSize;
+    bankData_->ramBanksProvided = true;
+    
+    // Forward bank data to MemoryViewerPanel for RAM region viewing (Requirement 7.1)
+    memory_panel_->SetBankData(bankData_.get());
+    
+    return true;
+}
+
+void GBDebugger::ClearBankData() {
+    // Reset all VRAM bank pointers to nullptr
+    for (int i = 0; i < 2; i++) {
+        bankData_->vramBanks[i] = nullptr;
+    }
+    bankData_->vramBanksProvided = false;
+    
+    // Reset all ROM bank pointers to nullptr
+    for (int i = 0; i < 512; i++) {
+        bankData_->romBanks[i] = nullptr;
+    }
+    bankData_->romBankCount = 0;
+    bankData_->romBanksProvided = false;
+    
+    // Reset all RAM bank pointers to nullptr
+    for (int i = 0; i < 16; i++) {
+        bankData_->ramBanks[i] = nullptr;
+    }
+    bankData_->ramBankCount = 0;
+    bankData_->ramBankSize = 0;
+    bankData_->ramBanksProvided = false;
+    
+    // Clear panel bank data (Requirements 11.1, 11.2)
+    // Clear VRAMViewerPanel external bank data
+    vram_panel_->SetVRAMBankData(nullptr, nullptr);
+    
+    // Clear MemoryViewerPanel bank data (passing nullptr clears the reference)
+    memory_panel_->SetBankData(nullptr);
 }
 
 SDL_Window* GBDebugger::GetWindow() const {

@@ -206,6 +206,51 @@ inline const IORegister* FindIORegister(uint16_t address) {
     return nullptr;
 }
 
+/**
+ * BankData - Storage for memory bank pointers
+ * 
+ * Manages pointers to bank data without taking ownership. This structure
+ * allows the debugger to access individual ROM, RAM, and VRAM banks
+ * independently of what is currently mapped into the GameBoy's address space.
+ * 
+ * Supports up to 512 ROM banks (8 MB max), 16 RAM banks, and 2 VRAM banks (CGB).
+ * All pointers are non-owning - the caller retains ownership of the memory.
+ * 
+ * Usage:
+ *   1. Create BankData instance (all pointers initialized to nullptr)
+ *   2. Set bank pointers via GBDebugger API methods
+ *   3. Panels access bank data through stored pointers
+ *   4. Call ClearBankData() to reset all pointers
+ */
+struct BankData {
+    // VRAM banks (CGB: 2 banks of 8KB each, DMG: 1 bank)
+    const uint8_t* vramBanks[2];
+    bool vramBanksProvided;
+    
+    // ROM banks (up to 512 banks of 16KB each)
+    const uint8_t* romBanks[512];
+    uint16_t romBankCount;
+    bool romBanksProvided;
+    
+    // RAM banks (up to 16 banks, size varies by MBC type)
+    const uint8_t* ramBanks[16];
+    uint8_t ramBankCount;
+    size_t ramBankSize;  // Size of each RAM bank in bytes
+    bool ramBanksProvided;
+    
+    BankData() 
+        : vramBanksProvided(false),
+          romBankCount(0),
+          romBanksProvided(false),
+          ramBankCount(0),
+          ramBankSize(0),
+          ramBanksProvided(false) {
+        for (int i = 0; i < 2; i++) vramBanks[i] = nullptr;
+        for (int i = 0; i < 512; i++) romBanks[i] = nullptr;
+        for (int i = 0; i < 16; i++) ramBanks[i] = nullptr;
+    }
+};
+
 } // namespace GBDebug
 
 #endif // DEBUGGER_TYPES_H

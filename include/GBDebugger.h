@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <memory>
+#include <functional>
 
 // Forward declarations
 struct SDL_Window;
@@ -23,6 +24,7 @@ class VRAMViewerPanel;
 // Forward declarations for VRAM viewer types
 enum class EmulationMode;
 struct CGBPalette;
+struct BankData;
 
 /**
  * GBDebugger - Emulator-agnostic GameBoy debugger
@@ -150,6 +152,54 @@ public:
      */
     bool UpdateColorRAM(const uint8_t* bgPaletteRAM, const uint8_t* objPaletteRAM);
     
+    // ========== Bank Data API ==========
+    
+    /**
+     * Set VRAM bank data for viewing
+     * 
+     * Allows inspection of individual VRAM banks independently of what is
+     * currently mapped. The debugger does not take ownership of the memory.
+     * 
+     * @param bank Bank number (0 or 1)
+     * @param data Pointer to 8192-byte VRAM bank (caller retains ownership)
+     * @return true if successful, false if bank number is invalid
+     */
+    bool SetVRAMBank(uint8_t bank, const uint8_t* data);
+    
+    /**
+     * Set ROM bank count and data
+     * 
+     * Allows inspection of all ROM banks in the cartridge. The debugger
+     * does not take ownership of the memory.
+     * 
+     * @param count Number of ROM banks (1-512)
+     * @param getBankFunc Function that returns pointer to bank N (16KB each)
+     * @return true if successful, false if count is invalid
+     */
+    bool SetROMBanks(uint16_t count, std::function<const uint8_t*(uint16_t)> getBankFunc);
+    
+    /**
+     * Set RAM bank count and data
+     * 
+     * Allows inspection of all cartridge RAM banks. The debugger does not
+     * take ownership of the memory.
+     * 
+     * @param count Number of RAM banks (0-16)
+     * @param bankSize Size of each RAM bank in bytes
+     * @param getBankFunc Function that returns pointer to bank N
+     * @return true if successful, false if count is invalid
+     */
+    bool SetRAMBanks(uint8_t count, size_t bankSize, 
+                     std::function<const uint8_t*(uint8_t)> getBankFunc);
+    
+    /**
+     * Clear all bank data (revert to mapped memory only)
+     * 
+     * Resets all bank pointers to nullptr and clears the "provided" flags.
+     * After calling this, the debugger will only show mapped memory.
+     */
+    void ClearBankData();
+    
     // ========== Window Access ==========
     
     /**
@@ -211,6 +261,7 @@ private:
     std::unique_ptr<MemoryViewerPanel> memory_panel_;
     std::unique_ptr<ControlPanel> control_panel_;
     std::unique_ptr<VRAMViewerPanel> vram_panel_;
+    std::unique_ptr<BankData> bankData_;
     bool is_open_;
     
     // Disable copy
